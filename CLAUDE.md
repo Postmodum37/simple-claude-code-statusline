@@ -10,7 +10,7 @@ This is a Claude Code plugin that provides a custom two-line statusline. It's a 
 
 This repo serves as both a **marketplace** and a **plugin**:
 
-- `marketplace.json` - Makes this repo a Claude Code marketplace containing the plugin
+- `.claude-plugin/marketplace.json` - Makes this repo a Claude Code marketplace
 - `.claude-plugin/plugin.json` - Plugin manifest
 - `bin/statusline.sh` - The main script. Reads JSON from stdin, outputs ANSI-formatted text to stdout.
 - `commands/setup.md` - Command that configures `~/.claude/settings.json`
