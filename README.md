@@ -119,6 +119,18 @@ Test the script manually:
 echo '{"model":{"id":"claude-opus-4-5-20251101"},"cwd":"/tmp","context_window":{"used_percentage":42,"context_window_size":200000}}' | ~/.claude/statusline.sh
 ```
 
+## Uninstalling
+
+Clean up the statusline config first:
+```sh
+/simple-statusline:cleanup
+```
+
+Then uninstall the plugin:
+```sh
+/plugin uninstall simple-statusline
+```
+
 ## License
 
 MIT
