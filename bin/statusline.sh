@@ -34,6 +34,9 @@ SEP_PIPE="│"
 # --- Read JSON input ---
 input=$(cat)
 
+# --- Context cache (prevents flicker during UI operations) ---
+context_cache="/tmp/claude-context-cache"
+
 # --- Extract all fields with single jq call ---
 eval "$(echo "$input" | jq -r '
   @sh "model_id=\(.model.id // "")",
@@ -56,6 +59,14 @@ eval "$(echo "$input" | jq -r '
   current_usage=0
   context_size=200000
 }
+
+# --- Use cached context if current parse returned zero ---
+if [[ $current_usage -eq 0 && -f "$context_cache" ]]; then
+  source "$context_cache" 2>/dev/null
+elif [[ $current_usage -gt 0 ]]; then
+  # Cache valid context values
+  echo "current_usage=$current_usage; context_size=$context_size; used_pct=$used_pct" > "$context_cache"
+fi
 
 # --- Terminal width ---
 term_width="${COLUMNS:-$(tput cols 2>/dev/null || echo 100)}"
