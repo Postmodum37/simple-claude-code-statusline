@@ -1,47 +1,38 @@
 ---
 name: setup
-description: Install and configure the simple-statusline for Claude Code
+description: Configure the statusline in Claude Code settings
+allowed-tools:
+  - Bash
+  - Read
+  - Edit
+  - Write
 ---
 
 # Simple Statusline Setup
 
-You are helping the user install the simple-statusline plugin.
+Configure the user's statusline setting to use this plugin.
 
-## Steps to perform:
+## Steps:
 
-1. **Find the plugin's statusline.sh script**
-   - Look for `bin/statusline.sh` in the plugin directory (the directory containing `.claude-plugin/plugin.json`)
-   - The plugin is installed somewhere under `~/.claude/plugins/`
+1. **Check jq is installed**
+   - Run `which jq` to verify
+   - If not installed, tell the user: `brew install jq`
 
-2. **Copy the script to ~/.claude/**
-   ```bash
-   cp <plugin-path>/bin/statusline.sh ~/.claude/statusline.sh
-   chmod +x ~/.claude/statusline.sh
-   ```
+2. **Read ~/.claude/settings.json**
+   - Create the file with `{}` if it doesn't exist
 
-3. **Update settings.json**
-   - Read `~/.claude/settings.json`
-   - Add or update the `statusLine` configuration:
+3. **Add/update the statusLine config:**
    ```json
    {
      "statusLine": {
        "type": "command",
-       "command": "~/.claude/statusline.sh"
+       "command": "${CLAUDE_PLUGIN_ROOT}/bin/statusline.sh"
      }
    }
    ```
    - Preserve all other existing settings
+   - `${CLAUDE_PLUGIN_ROOT}` is resolved by Claude Code to the plugin's cache directory
 
 4. **Confirm success**
-   - Tell the user the statusline is now configured
-   - Let them know they may need to restart Claude Code to see changes
-   - Mention they can edit `~/.claude/statusline.sh` directly to customize
-
-## Requirements
-
-The script requires:
-- `jq` for JSON parsing
-- `curl` for API rate limit fetching
-- `git` for repository status (optional)
-
-If jq is not installed, suggest: `brew install jq`
+   - Tell the user the statusline is configured
+   - Remind them to restart Claude Code to see changes

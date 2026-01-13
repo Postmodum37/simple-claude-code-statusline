@@ -45,10 +45,22 @@ brew install jq
 
 ### Option 1: Plugin (recommended)
 
+Add the marketplace:
 ```sh
-/plugin add Postmodum37/simple-claude-code-statusline
+/plugin marketplace add Postmodum37/simple-claude-code-statusline
+```
+
+Install the plugin:
+```sh
+/plugin install simple-statusline
+```
+
+Configure the statusline:
+```sh
 /simple-statusline:setup
 ```
+
+Restart Claude Code.
 
 ### Option 2: Manual
 

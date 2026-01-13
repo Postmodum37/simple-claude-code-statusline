@@ -1,0 +1,16 @@
+{
+  "name": "simple-statusline-marketplace",
+  "description": "A minimal statusline for Claude Code",
+  "owner": {
+    "name": "Tomas Novikovas",
+    "url": "https://github.com/Postmodum37"
+  },
+  "plugins": [
+    {
+      "name": "simple-statusline",
+      "description": "A simple, hackable two-line statusline showing model, git status, context usage, and rate limits",
+      "version": "1.0.0",
+      "source": "."
+    }
+  ]
+}
