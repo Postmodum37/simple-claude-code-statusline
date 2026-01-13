@@ -14,6 +14,7 @@ This repo serves as both a **marketplace** and a **plugin**:
 - `.claude-plugin/plugin.json` - Plugin manifest
 - `bin/statusline.sh` - The main script. Reads JSON from stdin, outputs ANSI-formatted text to stdout.
 - `commands/setup.md` - Command that configures `~/.claude/settings.json`
+- `hooks/` - SessionStart hook that reminds users to run setup if not configured
 
 When installed, the plugin runs from `${CLAUDE_PLUGIN_ROOT}/bin/statusline.sh` (the plugin cache directory).
 

@@ -55,12 +55,12 @@ Install the plugin:
 /plugin install simple-statusline
 ```
 
-Configure the statusline:
+Restart Claude Code, then configure:
 ```sh
 /simple-statusline:setup
 ```
 
-Restart Claude Code.
+The statusline appears immediately after setup (no second restart needed).
 
 ### Option 2: Manual
 
