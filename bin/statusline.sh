@@ -5,12 +5,6 @@
 
 # --- Tokyo Night Color Palette ---
 C_RESET="\033[0m"
-C_BG1="\033[48;5;238m"        # #394260 - model bg
-C_BG2="\033[48;5;235m"        # #212736 - dir bg
-C_BG3="\033[48;5;234m"        # #1d2230 - git bg
-C_FG1="\033[38;5;238m"        # #394260 - for separators
-C_FG2="\033[38;5;235m"        # #212736
-C_FG3="\033[38;5;234m"        # #1d2230
 C_ACCENT="\033[38;5;111m"     # #769ff0 - bright blue
 C_MUTED="\033[38;5;146m"      # #a3aed2 - muted text
 C_WHITE="\033[38;5;254m"      # #e3e5e5 - white text
@@ -28,14 +22,13 @@ C_GIT_DEL="\033[38;5;196m"    # Red for deleted
 C_GIT_AHEAD="\033[38;5;81m"   # Cyan for ahead
 C_GIT_BEHIND="\033[38;5;208m" # Orange for behind
 
-# Separator style
-SEP_PIPE="│"
-
 # --- Read JSON input ---
 input=$(cat)
 
-# --- Context cache (prevents flicker during UI operations) ---
+# --- Cache files ---
 context_cache="/tmp/claude-context-cache"
+git_cache="/tmp/claude-git-cache"
+usage_cache="/tmp/claude-usage-cache"
 
 # --- Extract all fields with single jq call ---
 eval "$(echo "$input" | jq -r '
@@ -44,8 +37,6 @@ eval "$(echo "$input" | jq -r '
   @sh "project_dir=\(.workspace.project_dir // "")",
   @sh "cwd=\(.cwd // "")",
   @sh "context_size=\(.context_window.context_window_size // 200000)",
-  @sh "total_input=\(.context_window.total_input_tokens // 0)",
-  @sh "total_output=\(.context_window.total_output_tokens // 0)",
   @sh "used_pct=\(.context_window.used_percentage // 0)",
   @sh "session_id=\(.session_id // "")",
   @sh "current_usage=\(
@@ -64,25 +55,10 @@ eval "$(echo "$input" | jq -r '
 if [[ $current_usage -eq 0 && -f "$context_cache" ]]; then
   source "$context_cache" 2>/dev/null
 elif [[ $current_usage -gt 0 ]]; then
-  # Cache valid context values
   echo "current_usage=$current_usage; context_size=$context_size; used_pct=$used_pct" > "$context_cache"
 fi
 
-# --- Terminal width ---
-term_width="${COLUMNS:-$(tput cols 2>/dev/null || echo 100)}"
-
 # --- Helper Functions ---
-
-format_tokens() {
-  local tokens=$1
-  if [[ $tokens -ge 1000000 ]]; then
-    echo "$((tokens / 1000000))m"
-  elif [[ $tokens -ge 1000 ]]; then
-    echo "$((tokens / 1000))k"
-  else
-    echo "$tokens"
-  fi
-}
 
 get_semantic_color() {
   local pct=$1
@@ -94,6 +70,17 @@ get_semantic_color() {
     echo "$C_HIGH"
   else
     echo "$C_CRIT"
+  fi
+}
+
+format_tokens() {
+  local tokens=$1
+  if [[ $tokens -ge 1000000 ]]; then
+    echo "$((tokens / 1000000))m"
+  elif [[ $tokens -ge 1000 ]]; then
+    echo "$((tokens / 1000))k"
+  else
+    echo "$tokens"
   fi
 }
 
@@ -115,8 +102,6 @@ format_duration() {
 format_reset_time() {
   local reset_iso=$1
   local now_utc=$(date -u +%s)
-
-  # Strip fractional seconds and timezone suffix, parse as UTC
   local reset_clean="${reset_iso%%.*}"
   local reset_ts=$(date -j -u -f "%Y-%m-%dT%H:%M:%S" "$reset_clean" +%s 2>/dev/null || echo "$now_utc")
   local diff=$((reset_ts - now_utc))
@@ -128,81 +113,86 @@ format_reset_time() {
   elif [[ $diff -lt 86400 ]]; then
     local hours=$((diff / 3600))
     local mins=$(((diff % 3600) / 60))
-    if [[ $mins -gt 0 ]]; then
-      echo "${hours}h${mins}m"
-    else
-      echo "${hours}h"
-    fi
+    [[ $mins -gt 0 ]] && echo "${hours}h${mins}m" || echo "${hours}h"
   else
     echo "$((diff / 86400))d"
   fi
 }
 
-# --- Model Display ---
+# --- Model Display (no subshells) ---
 model_short=""
-if [[ "$model_id" == *"opus"* ]]; then
-  model_short="Opus"
-elif [[ "$model_id" == *"sonnet"* ]]; then
-  model_short="Sonnet"
-elif [[ "$model_id" == *"haiku"* ]]; then
-  model_short="Haiku"
-elif [[ -n "$model_display" ]]; then
-  model_short=$(echo "$model_display" | awk '{print $1}')
+case "$model_id" in
+  *opus*)   model_short="Opus" ;;
+  *sonnet*) model_short="Sonnet" ;;
+  *haiku*)  model_short="Haiku" ;;
+  *)        model_short="${model_display%% *}" ;;
+esac
+
+# Extract version using bash parameter expansion (no sed)
+if [[ "$model_id" =~ -([0-9])-([0-9])- ]]; then
+  model_short="$model_short ${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
 fi
 
-# Extract version (e.g., "4.5" from "claude-opus-4-5-20251101")
-# Use sed since BASH_REMATCH is buggy in bash 3.2 (macOS default)
-version=$(echo "$model_id" | sed -n 's/.*-\([0-9]\)-\([0-9]\)-.*/\1.\2/p')
-if [[ -n "$version" ]]; then
-  model_short="$model_short $version"
-fi
-
-# --- Directory Display (~ substitution + truncate to 3 segments) ---
+# --- Directory Display (no subshells) ---
 dir_display=""
 if [[ -n "$cwd" ]]; then
-  # Replace home directory with ~
   dir_display="${cwd/#$HOME/~}"
 
-  # Count path segments and truncate if needed
-  # Use a simpler approach compatible with bash 3.x
-  segment_count=$(echo "$dir_display" | tr '/' '\n' | grep -c .)
+  # Count segments using parameter expansion
+  local_path="$dir_display"
+  segment_count=0
+  while [[ "$local_path" == */* ]]; do
+    local_path="${local_path#*/}"
+    ((segment_count++))
+  done
+  ((segment_count++))
 
   if [[ $segment_count -gt 3 ]]; then
     # Get last 3 segments
-    last_three=$(echo "$dir_display" | rev | cut -d'/' -f1-3 | rev)
-    dir_display="…/${last_three}"
+    IFS='/' read -ra parts <<< "$dir_display"
+    len=${#parts[@]}
+    dir_display="…/${parts[$((len-3))]}/${parts[$((len-2))]}/${parts[$((len-1))]}"
   fi
 fi
 
-# --- Git Display (full status) ---
-# Use --no-optional-locks to avoid conflicts with other git processes
+# --- Git Display (cached for 5 seconds) ---
 git_branch=""
 git_status=""
-if [[ -n "$project_dir" ]] && git --no-optional-locks -C "$project_dir" rev-parse --git-dir &>/dev/null 2>&1; then
-  # Branch name (up to 20 chars)
-  git_branch=$(git --no-optional-locks -C "$project_dir" rev-parse --abbrev-ref HEAD 2>/dev/null)
-  if [[ ${#git_branch} -gt 20 ]]; then
-    git_branch="${git_branch:0:17}…"
+
+if [[ -n "$project_dir" ]]; then
+  git_cache_age=999
+  if [[ -f "$git_cache" ]]; then
+    git_cache_age=$(( $(date +%s) - $(stat -f %m "$git_cache" 2>/dev/null || echo 0) ))
   fi
 
-  # File changes (single status call, parsed for all counts)
-  git_porcelain=$(git --no-optional-locks -C "$project_dir" status --porcelain 2>/dev/null)
-  if [[ -n "$git_porcelain" ]]; then
-    added=$(echo "$git_porcelain" | grep -c '^??\|^A ' 2>/dev/null); added=${added:-0}
-    modified=$(echo "$git_porcelain" | grep -c '^ M\|^M \|^MM' 2>/dev/null); modified=${modified:-0}
-    deleted=$(echo "$git_porcelain" | grep -c '^ D\|^D ' 2>/dev/null); deleted=${deleted:-0}
+  if [[ $git_cache_age -gt 5 ]]; then
+    # Refresh git cache
+    if git --no-optional-locks -C "$project_dir" rev-parse --git-dir &>/dev/null; then
+      git_branch=$(git --no-optional-locks -C "$project_dir" rev-parse --abbrev-ref HEAD 2>/dev/null)
+      [[ ${#git_branch} -gt 20 ]] && git_branch="${git_branch:0:17}…"
+
+      git_porcelain=$(git --no-optional-locks -C "$project_dir" status --porcelain 2>/dev/null)
+      added=0; modified=0; deleted=0
+      while IFS= read -r line; do
+        case "${line:0:2}" in
+          "??"|"A ") ((added++)) ;;
+          " M"|"M "|"MM") ((modified++)) ;;
+          " D"|"D ") ((deleted++)) ;;
+        esac
+      done <<< "$git_porcelain"
+
+      ahead=$(git --no-optional-locks -C "$project_dir" rev-list --count @{u}..HEAD 2>/dev/null || echo 0)
+      behind=$(git --no-optional-locks -C "$project_dir" rev-list --count HEAD..@{u} 2>/dev/null || echo 0)
+
+      # Save to cache
+      echo "git_branch='$git_branch'; added=$added; modified=$modified; deleted=$deleted; ahead=$ahead; behind=$behind" > "$git_cache"
+    fi
   else
-    added=0
-    modified=0
-    deleted=0
+    # Use cached git data
+    source "$git_cache" 2>/dev/null
   fi
-
-  # Ahead/behind
-  ahead=$(git --no-optional-locks -C "$project_dir" rev-list --count @{u}..HEAD 2>/dev/null || echo 0)
-  behind=$(git --no-optional-locks -C "$project_dir" rev-list --count HEAD..@{u} 2>/dev/null || echo 0)
 
   # Build status string
-  git_status=""
   [[ $added -gt 0 ]] && git_status+=" ${C_GIT_ADD}✚${added}${C_RESET}"
   [[ $modified -gt 0 ]] && git_status+=" ${C_GIT_MOD}●${modified}${C_RESET}"
   [[ $deleted -gt 0 ]] && git_status+=" ${C_GIT_DEL}✖${deleted}${C_RESET}"
@@ -220,47 +210,43 @@ else
   ctx_pct=0
 fi
 
-# Progress bar
+# Progress bar (no loop)
 bar_width=8
 filled=$((ctx_pct * bar_width / 100))
 [[ $filled -gt $bar_width ]] && filled=$bar_width
 empty=$((bar_width - filled))
 
-bar=""
-for ((i=0; i<filled; i++)); do bar+="▰"; done
-for ((i=0; i<empty; i++)); do bar+="▱"; done
+bar=$(printf '%*s' "$filled" '' | tr ' ' '▰')$(printf '%*s' "$empty" '' | tr ' ' '▱')
 
 ctx_color=$(get_semantic_color "$ctx_pct")
 ctx_tokens=$(format_tokens "$current_usage")
 ctx_max=$(format_tokens "$context_size")
 
-# --- Usage Stats (with caching) ---
-cache_file="/tmp/claude-usage-cache"
-cache_age=999
-
-if [[ -f "$cache_file" ]]; then
-  cache_age=$(( $(date +%s) - $(stat -f %m "$cache_file" 2>/dev/null || echo 0) ))
-fi
-
+# --- Usage Stats (cached 60s) ---
 usage_5h=""
 usage_7d=""
 
-if [[ $cache_age -gt 60 ]]; then
-  # Fetch fresh usage data
+usage_cache_age=999
+if [[ -f "$usage_cache" ]]; then
+  usage_cache_age=$(( $(date +%s) - $(stat -f %m "$usage_cache" 2>/dev/null || echo 0) ))
+fi
+
+if [[ $usage_cache_age -gt 60 ]]; then
   token=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null | jq -r '.claudeAiOauth.accessToken' 2>/dev/null)
   if [[ -n "$token" && "$token" != "null" ]]; then
     usage_json=$(curl -s -m 2 -H "Authorization: Bearer $token" -H "anthropic-beta: oauth-2025-04-20" "https://api.anthropic.com/api/oauth/usage" 2>/dev/null)
-    if [[ -n "$usage_json" ]]; then
-      echo "$usage_json" > "$cache_file"
-    fi
+    [[ -n "$usage_json" ]] && echo "$usage_json" > "$usage_cache"
   fi
 fi
 
-if [[ -f "$cache_file" ]]; then
-  five_util=$(jq -r '.five_hour.utilization // 0' "$cache_file" 2>/dev/null)
-  five_reset=$(jq -r '.five_hour.resets_at // ""' "$cache_file" 2>/dev/null)
-  seven_util=$(jq -r '.seven_day.utilization // 0' "$cache_file" 2>/dev/null)
-  seven_reset=$(jq -r '.seven_day.resets_at // ""' "$cache_file" 2>/dev/null)
+if [[ -f "$usage_cache" ]]; then
+  # Single jq call for all usage data
+  eval "$(jq -r '
+    @sh "five_util=\(.five_hour.utilization // 0)",
+    @sh "five_reset=\(.five_hour.resets_at // "")",
+    @sh "seven_util=\(.seven_day.utilization // 0)",
+    @sh "seven_reset=\(.seven_day.resets_at // "")"
+  ' "$usage_cache" 2>/dev/null)"
 
   five_util_int=${five_util%.*}
   seven_util_int=${seven_util%.*}
@@ -277,36 +263,21 @@ fi
 
 # --- Session Duration ---
 session_file="/tmp/claude-session-${session_id:-$$}"
-if [[ ! -f "$session_file" ]]; then
-  date +%s > "$session_file"
-fi
+[[ ! -f "$session_file" ]] && date +%s > "$session_file"
 start_time=$(cat "$session_file" 2>/dev/null || date +%s)
 duration_secs=$(( $(date +%s) - start_time ))
 duration_display=$(format_duration "$duration_secs")
 
-# --- Build Segments ---
+# --- Build Output ---
+sep=" ${C_MUTED}│${C_RESET} "
 
-sep=" ${C_MUTED}${SEP_PIPE}${C_RESET} "
+row1="${C_ACCENT}${model_short}${C_RESET}"
+[[ -n "$dir_display" ]] && row1+="${sep}${C_WHITE}${dir_display}${C_RESET}"
+[[ -n "$git_branch" ]] && row1+="${sep}${C_ACCENT}${git_branch}${C_RESET}${git_status}"
 
-seg_model="${C_ACCENT}${model_short}${C_RESET}"
-seg_dir="${C_WHITE}${dir_display}${C_RESET}"
-seg_git="${C_ACCENT}${git_branch}${C_RESET}${git_status}"
-seg_context="${ctx_color}${bar} ${ctx_tokens}/${ctx_max}${C_RESET}"
-seg_usage_5h="$usage_5h"
-seg_usage_7d="$usage_7d"
-seg_duration="${C_MUTED}${duration_display}${C_RESET}"
-
-# --- Two-Row Layout ---
-# Row 1: Model | Directory | Git
-# Row 2: Context | 5h usage | 7d usage | Duration
-
-row1="$seg_model"
-[[ -n "$dir_display" ]] && row1+="${sep}${seg_dir}"
-[[ -n "$git_branch" ]] && row1+="${sep}${seg_git}"
-
-row2="$seg_context"
-[[ -n "$usage_5h" ]] && row2+="${sep}${seg_usage_5h}"
-[[ -n "$usage_7d" ]] && row2+="${sep}${seg_usage_7d}"
-row2+="${sep}${seg_duration}"
+row2="${ctx_color}${bar} ${ctx_tokens}/${ctx_max}${C_RESET}"
+[[ -n "$usage_5h" ]] && row2+="${sep}${usage_5h}"
+[[ -n "$usage_7d" ]] && row2+="${sep}${usage_7d}"
+row2+="${sep}${C_MUTED}${duration_display}${C_RESET}"
 
 printf "%b\n%b" "$row1" "$row2"
