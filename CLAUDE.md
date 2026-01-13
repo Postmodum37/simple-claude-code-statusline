@@ -68,4 +68,12 @@ Use `/commit-commands:commit` for commits. Follow conventional commit style:
 - `docs:` documentation changes
 - `chore:` maintenance tasks
 
-Keep version in sync between `marketplace.json` and `.claude-plugin/plugin.json`.
+## Versioning
+
+Bump version in both `marketplace.json` and `.claude-plugin/plugin.json` for:
+- `feat:` - new features
+- `fix:` - bug fixes
+- `chore:` - maintenance tasks
+
+Do NOT bump version for:
+- `docs:` - documentation-only changes (README, CLAUDE.md, comments)

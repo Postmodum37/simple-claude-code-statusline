@@ -115,7 +115,9 @@ format_reset_time() {
     local mins=$(((diff % 3600) / 60))
     [[ $mins -gt 0 ]] && echo "${hours}h${mins}m" || echo "${hours}h"
   else
-    echo "$((diff / 86400))d"
+    local days=$((diff / 86400))
+    local hours=$(((diff % 86400) / 3600))
+    [[ $hours -gt 0 ]] && echo "${days}d${hours}h" || echo "${days}d"
   fi
 }
 
@@ -257,8 +259,8 @@ if [[ -f "$usage_cache" ]]; then
   five_time=$(format_reset_time "$five_reset")
   seven_time=$(format_reset_time "$seven_reset")
 
-  usage_5h="${five_color}5h:${five_util_int}%${C_MUTED}(${five_time})${C_RESET}"
-  usage_7d="${seven_color}7d:${seven_util_int}%${C_MUTED}(${seven_time})${C_RESET}"
+  usage_5h="${five_color}5h:${five_util_int}% ${C_MUTED}(${five_time})${C_RESET}"
+  usage_7d="${seven_color}7d:${seven_util_int}% ${C_MUTED}(${seven_time})${C_RESET}"
 fi
 
 # --- Session Duration ---
