@@ -18,21 +18,26 @@ Configure the user's statusline setting to use this plugin.
    - Run `which jq` to verify
    - If not installed, tell the user: `brew install jq`
 
-2. **Read ~/.claude/settings.json**
+2. **Create symlink at ~/.claude/statusline.sh**
+   - Find the plugin's script at `${CLAUDE_PLUGIN_ROOT}/bin/statusline.sh`
+   - Create symlink: `ln -sf "${CLAUDE_PLUGIN_ROOT}/bin/statusline.sh" ~/.claude/statusline.sh`
+   - This allows plugin updates to work automatically
+
+3. **Read ~/.claude/settings.json**
    - Create the file with `{}` if it doesn't exist
 
-3. **Add/update the statusLine config:**
+4. **Add/update the statusLine config:**
    ```json
    {
      "statusLine": {
        "type": "command",
-       "command": "${CLAUDE_PLUGIN_ROOT}/bin/statusline.sh"
+       "command": "~/.claude/statusline.sh"
      }
    }
    ```
    - Preserve all other existing settings
-   - `${CLAUDE_PLUGIN_ROOT}` is resolved by Claude Code to the plugin's cache directory
+   - The symlink points to the plugin, so updates work automatically
 
-4. **Confirm success**
+5. **Confirm success**
    - Tell the user the statusline is configured
-   - Remind them to restart Claude Code to see changes
+   - Mention that future plugin updates will work automatically
