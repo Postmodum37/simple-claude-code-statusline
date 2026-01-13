@@ -1,8 +1,10 @@
 # Simple Claude Code Statusline
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 A minimal, hackable two-line statusline for Claude Code.
 
-![screenshot](screenshot.png)
+![Two-line statusline showing model, git status, and context usage](screenshot.png)
 
 ## Features
 
@@ -19,16 +21,16 @@ A minimal, hackable two-line statusline for Claude Code.
 
 | Usage | Color | Example |
 |-------|-------|---------|
-| 0-50% | Green | ![green](screenshot-green.png) |
-| 51-75% | Yellow | ![yellow](screenshot-yellow.png) |
-| 76-90% | Orange | ![orange](screenshot-orange.png) |
-| 91%+ | Red | ![red](screenshot-red.png) |
+| 0-50% | Green | ![Context bar at 0-50% in green](screenshot-green.png) |
+| 51-75% | Yellow | ![Context bar at 51-75% in yellow](screenshot-yellow.png) |
+| 76-90% | Orange | ![Context bar at 76-90% in orange](screenshot-orange.png) |
+| 91%+ | Red | ![Context bar at 91%+ in red](screenshot-red.png) |
 
 ### Git Status
 
 Shows branch name with file counts:
 
-![git status](screenshot-git.png)
+![Git branch with added, modified, and deleted file counts](screenshot-git.png)
 
 ## Requirements
 
