@@ -51,11 +51,13 @@ eval "$(echo "$input" | jq -r '
   context_size=200000
 }
 
-# --- Use cached context if current parse returned zero ---
+# --- Use cached context if current parse returned zero AND same session ---
 if [[ $current_usage -eq 0 && -f "$context_cache" ]]; then
   source "$context_cache" 2>/dev/null
+  # Only use cache if session matches
+  [[ "$cached_session_id" != "$session_id" ]] && { current_usage=0; used_pct=0; }
 elif [[ $current_usage -gt 0 ]]; then
-  echo "current_usage=$current_usage; context_size=$context_size; used_pct=$used_pct" > "$context_cache"
+  echo "cached_session_id='$session_id'; current_usage=$current_usage; context_size=$context_size; used_pct=$used_pct" > "$context_cache"
 fi
 
 # --- Helper Functions ---
