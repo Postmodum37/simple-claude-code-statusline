@@ -44,15 +44,17 @@ The script uses:
 - `curl` - Rate limit API calls
 - `git` - Repository status
 - macOS `security` command - OAuth token retrieval from keychain
-- macOS `stat -f` syntax - Cache age checking
+- Platform-specific: `stat -f %m` (macOS) or `stat -c %Y` (Linux) for cache age
+- Platform-specific: `date -j -f` (macOS) or `date -d` (Linux) for ISO date parsing
 
 ## Key Implementation Notes
 
 - Uses `--no-optional-locks` with git commands to avoid conflicts
-- Caches rate limit API responses to `/tmp/claude-usage-cache` (60s TTL)
-- Session start time stored in `/tmp/claude-session-{id}`
+- Caches rate limit API responses to `/tmp/claude-usage-cache` (60s TTL, 15s for errors)
+- Session start time stored in `/tmp/claude-session-{id}` (falls back to project_dir hash if no session_id)
 - Colors use Tokyo Night palette defined at top of script
-- Compatible with bash 3.2 (macOS default) - avoids `BASH_REMATCH`
+- Compatible with bash 3.2 (macOS default) - uses `=~` without capture groups to avoid `BASH_REMATCH`
+- Cross-platform: auto-detects macOS vs Linux for stat/date commands
 
 ## Plugin Development
 
