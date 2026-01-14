@@ -37,7 +37,7 @@ eval "$(echo "$input" | jq -r '
   @sh "project_dir=\(.workspace.project_dir // "")",
   @sh "cwd=\(.cwd // "")",
   @sh "context_size=\(.context_window.context_window_size // 200000)",
-  @sh "used_pct=\(.context_window.used_percentage // 0)",
+  @sh "used_pct=\(.context_window.used_percentage // "")",
   @sh "session_id=\(.session_id // "")",
   @sh "current_usage=\(
     (.context_window.current_usage.input_tokens // 0) +
@@ -54,8 +54,8 @@ eval "$(echo "$input" | jq -r '
 # --- Use cached context if current parse returned zero AND same session ---
 if [[ $current_usage -eq 0 && -f "$context_cache" ]]; then
   source "$context_cache" 2>/dev/null
-  # Only use cache if session matches
-  [[ "$cached_session_id" != "$session_id" ]] && { current_usage=0; used_pct=0; }
+  # Only use cache if session matches; otherwise clear to trigger "no data" state
+  [[ "$cached_session_id" != "$session_id" ]] && { current_usage=0; used_pct=""; }
 elif [[ $current_usage -gt 0 ]]; then
   echo "cached_session_id='$session_id'; current_usage=$current_usage; context_size=$context_size; used_pct=$used_pct" > "$context_cache"
 fi
@@ -205,13 +205,16 @@ if [[ -n "$project_dir" ]]; then
 fi
 
 # --- Context Calculation ---
+ctx_no_data=false
 if [[ $current_usage -gt 0 && $context_size -gt 0 ]]; then
   ctx_pct=$((current_usage * 100 / context_size))
-elif [[ -n "$used_pct" && "$used_pct" != "0" ]]; then
+elif [[ -n "$used_pct" ]]; then
   ctx_pct=${used_pct%.*}
   current_usage=$((ctx_pct * context_size / 100))
 else
+  # No data available (fresh session start)
   ctx_pct=0
+  ctx_no_data=true
 fi
 
 # Progress bar (no loop)
@@ -223,7 +226,11 @@ empty=$((bar_width - filled))
 bar=$(printf '%*s' "$filled" '' | tr ' ' '▰')$(printf '%*s' "$empty" '' | tr ' ' '▱')
 
 ctx_color=$(get_semantic_color "$ctx_pct")
-ctx_tokens=$(format_tokens "$current_usage")
+if [[ "$ctx_no_data" == "true" ]]; then
+  ctx_tokens="—"
+else
+  ctx_tokens=$(format_tokens "$current_usage")
+fi
 ctx_max=$(format_tokens "$context_size")
 
 # --- Usage Stats (cached 60s) ---
