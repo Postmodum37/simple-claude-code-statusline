@@ -236,6 +236,7 @@ ctx_max=$(format_tokens "$context_size")
 # --- Usage Stats (cached 60s) ---
 usage_5h=""
 usage_7d=""
+usage_extra=""
 
 usage_cache_age=999
 if [[ -f "$usage_cache" ]]; then
@@ -256,7 +257,11 @@ if [[ -f "$usage_cache" ]]; then
     @sh "five_util=\(.five_hour.utilization // 0)",
     @sh "five_reset=\(.five_hour.resets_at // "")",
     @sh "seven_util=\(.seven_day.utilization // 0)",
-    @sh "seven_reset=\(.seven_day.resets_at // "")"
+    @sh "seven_reset=\(.seven_day.resets_at // "")",
+    @sh "extra_enabled=\(.extra_usage.is_enabled // false)",
+    @sh "extra_util=\(.extra_usage.utilization // 0)",
+    @sh "extra_used=\(.extra_usage.used_credits // 0)",
+    @sh "extra_limit=\(.extra_usage.monthly_limit // 0)"
   ' "$usage_cache" 2>/dev/null)"
 
   five_util_int=${five_util%.*}
@@ -270,6 +275,14 @@ if [[ -f "$usage_cache" ]]; then
 
   usage_5h="${five_color}5h:${five_util_int}% ${C_MUTED}(${five_time})${C_RESET}"
   usage_7d="${seven_color}7d:${seven_util_int}% ${C_MUTED}(${seven_time})${C_RESET}"
+
+  # Extra usage (only show when enabled)
+  if [[ "$extra_enabled" == "true" ]]; then
+    extra_util_int=${extra_util%.*}
+    extra_used_int=${extra_used%.*}
+    extra_color=$(get_semantic_color "$extra_util_int")
+    usage_extra="${extra_color}Extra:${extra_util_int}% ${C_MUTED}(\$${extra_used_int}/\$${extra_limit})${C_RESET}"
+  fi
 fi
 
 # --- Session Duration ---
@@ -289,6 +302,7 @@ row1="${C_ACCENT}${model_short}${C_RESET}"
 row2="${ctx_color}${bar} ${ctx_tokens}/${ctx_max}${C_RESET}"
 [[ -n "$usage_5h" ]] && row2+="${sep}${usage_5h}"
 [[ -n "$usage_7d" ]] && row2+="${sep}${usage_7d}"
+[[ -n "$usage_extra" ]] && row2+="${sep}${usage_extra}"
 row2+="${sep}${C_MUTED}${duration_display}${C_RESET}"
 
 printf "%b\n%b" "$row1" "$row2"
