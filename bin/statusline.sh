@@ -25,8 +25,10 @@ C_GIT_BEHIND="\033[38;5;208m" # Orange for behind
 # --- Cache current timestamp (avoid multiple date calls) ---
 NOW=$(date +%s)
 
-# --- Platform detection for stat/date compatibility ---
-if [[ "$(uname)" == "Darwin" ]]; then
+# --- Platform detection (cached for reuse) ---
+IS_MACOS=$([[ "$(uname)" == "Darwin" ]] && echo true || echo false)
+
+if [[ "$IS_MACOS" == "true" ]]; then
   stat_mtime() { stat -f %m "$1" 2>/dev/null || echo 0; }
   parse_iso_date() {
     local iso="${1%%.*}"
@@ -58,6 +60,9 @@ context_size=200000
 used_pct=0
 session_id=""
 current_usage=0
+lines_added=0
+lines_removed=0
+duration_ms=0
 
 eval "$(echo "$input" | jq -r '
   @sh "model_id=\(.model.id // "")",
@@ -67,6 +72,9 @@ eval "$(echo "$input" | jq -r '
   @sh "context_size=\(.context_window.context_window_size // 200000)",
   @sh "used_pct=\(.context_window.used_percentage // "")",
   @sh "session_id=\(.session_id // "")",
+  @sh "lines_added=\(.cost.total_lines_added // 0)",
+  @sh "lines_removed=\(.cost.total_lines_removed // 0)",
+  @sh "duration_ms=\(.cost.total_duration_ms // 0)",
   @sh "current_usage=\(
     (.context_window.current_usage.input_tokens // 0) +
     (.context_window.current_usage.output_tokens // 0) +
@@ -346,7 +354,12 @@ fi
 
 # Refresh if: cache expired (60s) OR error cache expired (15s)
 if [[ $usage_cache_age -gt 60 ]] || { [[ "$usage_is_error" == "true" ]] && [[ $usage_cache_age -gt 15 ]]; }; then
-  token=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null | jq -r '.claudeAiOauth.accessToken' 2>/dev/null)
+  # Get OAuth token: macOS uses keychain, Linux uses credentials file
+  if [[ "$IS_MACOS" == "true" ]]; then
+    token=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null | jq -r '.claudeAiOauth.accessToken' 2>/dev/null)
+  else
+    token=$(jq -r '.claudeAiOauth.accessToken' ~/.claude/.credentials.json 2>/dev/null)
+  fi
   if [[ -n "$token" && "$token" != "null" ]]; then
     usage_json=$(curl -s -m 2 -H "Authorization: Bearer $token" -H "anthropic-beta: oauth-2025-04-20" "https://api.anthropic.com/api/oauth/usage" 2>/dev/null)
     # Only cache if we got a response (even errors, for rate limiting)
@@ -404,22 +417,15 @@ if [[ -f "$usage_cache" ]] && grep -q '"five_hour"' "$usage_cache" 2>/dev/null; 
   fi
 fi
 
-# --- Session Duration ---
-# Use session_id if available, otherwise use project_dir hash for stability
-if [[ -n "$session_id" ]]; then
-  session_key="$session_id"
-elif [[ -n "$project_dir" ]]; then
-  # Create a stable key from project dir (simple hash using cksum)
-  session_key=$(echo "$project_dir" | cksum | cut -d' ' -f1)
-else
-  session_key="default"
-fi
-
-session_file="/tmp/claude-session-${session_key}"
-[[ ! -f "$session_file" ]] && echo "$NOW" > "$session_file"
-start_time=$(cat "$session_file" 2>/dev/null || echo "$NOW")
-duration_secs=$(( NOW - start_time ))
+# --- Session Duration (from Claude Code's cost.total_duration_ms) ---
+duration_secs=$((duration_ms / 1000))
 duration_display=$(format_duration "$duration_secs")
+
+# --- Lines Changed ---
+lines_display=""
+if [[ $lines_added -gt 0 || $lines_removed -gt 0 ]]; then
+  lines_display="${C_GIT_ADD}+${lines_added}${C_RESET}/${C_GIT_DEL}-${lines_removed}${C_RESET}"
+fi
 
 # --- Build Output ---
 sep=" ${C_MUTED}│${C_RESET} "
@@ -427,6 +433,7 @@ sep=" ${C_MUTED}│${C_RESET} "
 row1="${C_ACCENT}${model_short}${C_RESET}"
 [[ -n "$dir_display" ]] && row1+="${sep}${C_WHITE}${dir_display}${C_RESET}"
 [[ -n "$git_branch" ]] && row1+="${sep}${C_ACCENT}${git_branch}${C_RESET}${git_status}"
+[[ -n "$lines_display" ]] && row1+="${sep}${lines_display}"
 
 row2="${ctx_color}${bar} ${ctx_tokens}/${ctx_max}${C_RESET}"
 [[ -n "$usage_5h" ]] && row2+="${sep}${usage_5h}"

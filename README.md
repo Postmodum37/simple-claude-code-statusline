@@ -8,13 +8,15 @@ A minimal, hackable two-line statusline for Claude Code.
 
 ## Features
 
-**Line 1:** Model | Directory | Git branch + status
+**Line 1:** Model | Directory | Git branch + status | Lines changed
 **Line 2:** Context usage bar | 5h rate limit | 7d rate limit | Session duration
 
 - Tokyo Night color scheme
 - Context usage with color-coded progress bar
 - Rate limit tracking with time until reset
 - Git branch with added/modified/deleted counts
+- Session lines changed (+added/-removed)
+- Cross-platform (macOS and Linux)
 - No build step - just bash
 
 ### Context Usage Colors
@@ -114,11 +116,76 @@ row2="$seg_context"
 row2+="${sep}${seg_duration}"
 ```
 
+## JSON Input Reference
+
+Claude Code pipes JSON to statusline scripts via stdin. The official docs don't cover all available fields - here's what's actually available (as of Claude Code 2.1.12):
+
+### Documented Fields
+
+```json
+{
+  "hook_event_name": "Status",
+  "session_id": "abc123...",
+  "cwd": "/current/working/directory",
+  "model": {
+    "id": "claude-opus-4-5-20251101",
+    "display_name": "Opus 4.5"
+  },
+  "workspace": {
+    "current_dir": "/current/working/directory",
+    "project_dir": "/original/project/directory"
+  },
+  "version": "2.1.12",
+  "cost": {
+    "total_cost_usd": 0.05,
+    "total_duration_ms": 120000,
+    "total_lines_added": 156,
+    "total_lines_removed": 23
+  }
+}
+```
+
+### Undocumented Fields (added in v2.1.6)
+
+These fields are available but not in the official statusline documentation:
+
+```json
+{
+  "context_window": {
+    "context_window_size": 200000,
+    "used_percentage": 45,
+    "remaining_percentage": 55,
+    "current_usage": {
+      "input_tokens": 50000,
+      "output_tokens": 20000,
+      "cache_creation_input_tokens": 10000,
+      "cache_read_input_tokens": 10000
+    }
+  }
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `context_window.context_window_size` | Total context window size in tokens |
+| `context_window.used_percentage` | Percentage of context used (0-100) |
+| `context_window.remaining_percentage` | Percentage remaining (0-100) |
+| `context_window.current_usage.*` | Breakdown of token usage by type |
+
+### Rate Limits (via OAuth API)
+
+This plugin also fetches rate limit data from the Anthropic API (requires OAuth authentication):
+
+- **macOS:** Uses keychain (`security find-generic-password`)
+- **Linux:** Reads from `~/.claude/.credentials.json`
+
+The API returns 5-hour and 7-day utilization percentages with reset times.
+
 ## Testing
 
 Test the script manually:
 ```sh
-echo '{"model":{"id":"claude-opus-4-5-20251101"},"cwd":"/tmp","context_window":{"used_percentage":42,"context_window_size":200000}}' | ~/.claude/statusline.sh
+echo '{"model":{"id":"claude-opus-4-5-20251101"},"cwd":"/tmp","context_window":{"used_percentage":42,"context_window_size":200000},"cost":{"total_duration_ms":3600000,"total_lines_added":50,"total_lines_removed":10}}' | ~/.claude/statusline.sh
 ```
 
 ## Uninstalling
