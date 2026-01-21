@@ -45,10 +45,11 @@ fi
 # --- Read JSON input ---
 input=$(cat)
 
-# --- Cache files ---
-context_cache="/tmp/claude-context-cache"
-git_cache="/tmp/claude-git-cache"
-usage_cache="/tmp/claude-usage-cache"
+# --- Cache files (respect CLAUDE_CODE_TMPDIR if set) ---
+cache_dir="${CLAUDE_CODE_TMPDIR:-/tmp}"
+context_cache="${cache_dir}/claude-context-cache"
+git_cache="${cache_dir}/claude-git-cache"
+usage_cache="${cache_dir}/claude-usage-cache"
 
 # --- Extract all fields with single jq call ---
 # Initialize all variables with defaults first

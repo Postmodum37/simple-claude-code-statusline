@@ -50,8 +50,7 @@ The script uses:
 ## Key Implementation Notes
 
 - Uses `--no-optional-locks` with git commands to avoid conflicts
-- Caches rate limit API responses to `/tmp/claude-usage-cache` (60s TTL, 15s for errors)
-- Session start time stored in `/tmp/claude-session-{id}` (falls back to project_dir hash if no session_id)
+- Caches to `${CLAUDE_CODE_TMPDIR:-/tmp}/claude-*` (rate limit: 60s TTL, 15s for errors; git: 5s TTL)
 - Colors use Tokyo Night palette defined at top of script
 - Compatible with bash 3.2 (macOS default) - uses `=~` without capture groups to avoid `BASH_REMATCH`
 - Cross-platform: auto-detects macOS vs Linux for stat/date commands
