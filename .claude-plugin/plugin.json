@@ -1,6 +1,6 @@
 {
   "name": "simple-statusline",
-  "version": "1.3.2",
+  "version": "1.3.3",
   "description": "A simple, hackable two-line statusline for Claude Code showing model, git status, context usage, and rate limits",
   "author": {
     "name": "Tomas Novikovas",
