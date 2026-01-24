@@ -64,6 +64,7 @@ current_usage=0
 lines_added=0
 lines_removed=0
 duration_ms=0
+total_cost=0
 
 eval "$(echo "$input" | jq -r '
   @sh "model_id=\(.model.id // "")",
@@ -76,6 +77,7 @@ eval "$(echo "$input" | jq -r '
   @sh "lines_added=\(.cost.total_lines_added // 0)",
   @sh "lines_removed=\(.cost.total_lines_removed // 0)",
   @sh "duration_ms=\(.cost.total_duration_ms // 0)",
+  @sh "total_cost=\(.cost.total_cost_usd // 0)",
   @sh "current_usage=\(
     (.context_window.current_usage.input_tokens // 0) +
     (.context_window.current_usage.output_tokens // 0) +
@@ -428,6 +430,21 @@ if [[ $lines_added -gt 0 || $lines_removed -gt 0 ]]; then
   lines_display="${C_GIT_ADD}+${lines_added}${C_RESET}/${C_GIT_DEL}-${lines_removed}${C_RESET}"
 fi
 
+# --- Session Cost ---
+cost_display=""
+if [[ -n "$total_cost" && "$total_cost" != "0" ]]; then
+  # Format cost based on magnitude
+  cost_int=${total_cost%.*}
+  [[ -z "$cost_int" ]] && cost_int=0
+  if [[ $cost_int -ge 10 ]]; then
+    # $10+ -> show as integer: $12
+    cost_display="${C_MUTED}\$${cost_int}${C_RESET}"
+  else
+    # < $10 -> show with decimals: $0.23 or $1.50
+    cost_display="${C_MUTED}\$${total_cost}${C_RESET}"
+  fi
+fi
+
 # --- Build Output ---
 sep=" ${C_MUTED}│${C_RESET} "
 
@@ -440,6 +457,7 @@ row2="${ctx_color}${bar} ${ctx_tokens}/${ctx_max}${C_RESET}"
 [[ -n "$usage_5h" ]] && row2+="${sep}${usage_5h}"
 [[ -n "$usage_7d" ]] && row2+="${sep}${usage_7d}"
 [[ -n "$usage_extra" ]] && row2+="${sep}${usage_extra}"
+[[ -n "$cost_display" ]] && row2+="${sep}${cost_display}"
 row2+="${sep}${C_MUTED}${duration_display}${C_RESET}"
 
 printf "%b\n%b" "$row1" "$row2"
