@@ -441,7 +441,8 @@ if [[ -n "$total_cost" && "$total_cost" != "0" ]]; then
     cost_display="${C_MUTED}\$${cost_int}${C_RESET}"
   else
     # < $10 -> show with decimals: $0.23 or $1.50
-    cost_display="${C_MUTED}\$${total_cost}${C_RESET}"
+    cost_rounded=$(printf "%.2f" "$total_cost")
+    cost_display="${C_MUTED}\$${cost_rounded}${C_RESET}"
   fi
 fi
 
