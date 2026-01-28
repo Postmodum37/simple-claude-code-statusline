@@ -22,6 +22,12 @@ C_GIT_DEL="\033[38;5;196m"    # Red for deleted
 C_GIT_AHEAD="\033[38;5;81m"   # Cyan for ahead
 C_GIT_BEHIND="\033[38;5;208m" # Orange for behind
 
+# PR status colors (matching Claude Code's prompt footer)
+C_PR_APPROVED="\033[38;5;114m"   # Green for approved
+C_PR_PENDING="\033[38;5;214m"    # Yellow for pending
+C_PR_CHANGES="\033[38;5;196m"    # Red for changes requested
+C_PR_DRAFT="\033[38;5;146m"      # Muted for draft
+
 # --- Cache current timestamp (avoid multiple date calls) ---
 NOW=$(date +%s)
 
@@ -50,6 +56,7 @@ cache_dir="${CLAUDE_CODE_TMPDIR:-/tmp}"
 context_cache="${cache_dir}/claude-context-cache"
 git_cache="${cache_dir}/claude-git-cache"
 usage_cache="${cache_dir}/claude-usage-cache"
+pr_cache="${cache_dir}/claude-pr-cache"
 
 # --- Extract all fields with single jq call ---
 # Initialize all variables with defaults first
@@ -302,6 +309,59 @@ if [[ -n "$project_dir" ]]; then
   [[ $behind -gt 0 ]] && git_status+=" ${C_GIT_BEHIND}↓${behind}${C_RESET}"
 fi
 
+# --- PR Status (cached 30s) ---
+pr_status=""
+pr_display=""
+
+if [[ -n "$project_dir" && -n "$git_branch" ]]; then
+  pr_cache_age=999
+  if [[ -f "$pr_cache" ]]; then
+    pr_cache_age=$(( NOW - $(stat_mtime "$pr_cache") ))
+  fi
+
+  # Refresh PR cache every 30 seconds
+  if [[ $pr_cache_age -gt 30 ]]; then
+    # Check for gh CLI and get PR info for current branch
+    if command -v gh &>/dev/null; then
+      pr_json=$(gh pr view --json state,reviewDecision,isDraft 2>/dev/null)
+      if [[ -n "$pr_json" ]]; then
+        echo "$pr_json" > "$pr_cache"
+      else
+        # No PR for this branch - cache empty result
+        echo '{"state":"NONE"}' > "$pr_cache"
+      fi
+    fi
+  fi
+
+  # Parse cached PR status
+  if [[ -f "$pr_cache" ]]; then
+    eval "$(jq -r '
+      @sh "pr_state=\(.state // "NONE")",
+      @sh "pr_review=\(.reviewDecision // "")",
+      @sh "pr_draft=\(.isDraft // false)"
+    ' "$pr_cache" 2>/dev/null)" || {
+      pr_state="NONE"
+      pr_review=""
+      pr_draft=false
+    }
+
+    # Build PR status display (colored dot + label)
+    if [[ "$pr_state" != "NONE" ]]; then
+      if [[ "$pr_draft" == "true" ]]; then
+        pr_display="${C_PR_DRAFT}◌ draft${C_RESET}"
+      elif [[ "$pr_review" == "APPROVED" ]]; then
+        pr_display="${C_PR_APPROVED}● approved${C_RESET}"
+      elif [[ "$pr_review" == "CHANGES_REQUESTED" ]]; then
+        pr_display="${C_PR_CHANGES}● changes${C_RESET}"
+      elif [[ "$pr_state" == "OPEN" ]]; then
+        pr_display="${C_PR_PENDING}● pending${C_RESET}"
+      elif [[ "$pr_state" == "MERGED" ]]; then
+        pr_display="${C_PR_APPROVED}● merged${C_RESET}"
+      fi
+    fi
+  fi
+fi
+
 # --- Context Calculation ---
 ctx_no_data=false
 if [[ $current_usage -gt 0 && $context_size -gt 0 ]]; then
@@ -452,6 +512,7 @@ sep=" ${C_MUTED}│${C_RESET} "
 row1="${C_ACCENT}${model_short}${C_RESET}"
 [[ -n "$dir_display" ]] && row1+="${sep}${C_WHITE}${dir_display}${C_RESET}"
 [[ -n "$git_branch" ]] && row1+="${sep}${C_ACCENT}${git_branch}${C_RESET}${git_status}"
+[[ -n "$pr_display" ]] && row1+="${sep}${pr_display}"
 [[ -n "$lines_display" ]] && row1+="${sep}${lines_display}"
 
 row2="${ctx_color}${bar} ${ctx_tokens}/${ctx_max}${C_RESET}"

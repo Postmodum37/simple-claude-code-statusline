@@ -27,8 +27,8 @@ Claude Code pipes JSON to the script containing:
 - `session_id` - For session duration tracking
 
 The script outputs two lines of ANSI-escaped text:
-1. Model | Directory | Git branch + status
-2. Context bar | 5h rate limit | 7d rate limit | Duration
+1. Model | Directory | Git branch + status | PR status | Lines changed
+2. Context bar | 5h rate limit | 7d rate limit | Cost | Duration
 
 ## Testing
 
@@ -43,6 +43,7 @@ The script uses:
 - `jq` - JSON parsing (required)
 - `curl` - Rate limit API calls
 - `git` - Repository status
+- `gh` - GitHub CLI for PR status (optional - PR status hidden if not installed)
 - macOS `security` command - OAuth token retrieval from keychain
 - Platform-specific: `stat -f %m` (macOS) or `stat -c %Y` (Linux) for cache age
 - Platform-specific: `date -j -f` (macOS) or `date -d` (Linux) for ISO date parsing
@@ -50,7 +51,7 @@ The script uses:
 ## Key Implementation Notes
 
 - Uses `--no-optional-locks` with git commands to avoid conflicts
-- Caches to `${CLAUDE_CODE_TMPDIR:-/tmp}/claude-*` (rate limit: 60s TTL, 15s for errors; git: 5s TTL)
+- Caches to `${CLAUDE_CODE_TMPDIR:-/tmp}/claude-*` (rate limit: 60s TTL, 15s for errors; git: 5s TTL; PR: 30s TTL)
 - Colors use Tokyo Night palette defined at top of script
 - Compatible with bash 3.2 (macOS default) - uses `=~` without capture groups to avoid `BASH_REMATCH`
 - Cross-platform: auto-detects macOS vs Linux for stat/date commands
