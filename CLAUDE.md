@@ -48,6 +48,12 @@ The script uses:
 - Platform-specific: `stat -f %m` (macOS) or `stat -c %Y` (Linux) for cache age
 - Platform-specific: `date -j -f` (macOS) or `date -d` (Linux) for ISO date parsing
 
+## Configuration
+
+Environment variables can customize behavior:
+
+- `STATUSLINE_SHOW_PR` - Set to `false` to hide PR status (default: `true`). Useful if you prefer Claude Code's native PR indicator (added in 2.1.20+).
+
 ## Key Implementation Notes
 
 - Uses `--no-optional-locks` with git commands to avoid conflicts
@@ -55,6 +61,7 @@ The script uses:
 - Colors use Tokyo Night palette defined at top of script
 - Compatible with bash 3.2 (macOS default) - uses `=~` without capture groups to avoid `BASH_REMATCH`
 - Cross-platform: auto-detects macOS vs Linux for stat/date commands
+- PR merged status uses purple color to match Claude Code 2.1.23+ styling
 
 ## Plugin Development
 

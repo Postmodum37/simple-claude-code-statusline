@@ -27,6 +27,10 @@ C_PR_APPROVED="\033[38;5;114m"   # Green for approved
 C_PR_PENDING="\033[38;5;214m"    # Yellow for pending
 C_PR_CHANGES="\033[38;5;196m"    # Red for changes requested
 C_PR_DRAFT="\033[38;5;146m"      # Muted for draft
+C_PR_MERGED="\033[38;5;135m"     # Purple for merged (matching Claude Code 2.1.23+)
+
+# --- Configuration (can be overridden via environment variables) ---
+STATUSLINE_SHOW_PR="${STATUSLINE_SHOW_PR:-true}"  # Set to "false" to hide PR status (useful if using Claude Code's native PR indicator)
 
 # --- Cache current timestamp (avoid multiple date calls) ---
 NOW=$(date +%s)
@@ -313,7 +317,7 @@ fi
 pr_status=""
 pr_display=""
 
-if [[ -n "$project_dir" && -n "$git_branch" ]]; then
+if [[ "$STATUSLINE_SHOW_PR" == "true" && -n "$project_dir" && -n "$git_branch" ]]; then
   pr_cache_age=999
   if [[ -f "$pr_cache" ]]; then
     pr_cache_age=$(( NOW - $(stat_mtime "$pr_cache") ))
@@ -356,7 +360,7 @@ if [[ -n "$project_dir" && -n "$git_branch" ]]; then
       elif [[ "$pr_state" == "OPEN" ]]; then
         pr_display="${C_PR_PENDING}● pending${C_RESET}"
       elif [[ "$pr_state" == "MERGED" ]]; then
-        pr_display="${C_PR_APPROVED}● merged${C_RESET}"
+        pr_display="${C_PR_MERGED}● merged${C_RESET}"
       fi
     fi
   fi
