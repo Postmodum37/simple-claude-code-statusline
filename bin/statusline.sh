@@ -57,7 +57,6 @@ input=$(cat)
 
 # --- Cache files (respect CLAUDE_CODE_TMPDIR if set) ---
 cache_dir="${CLAUDE_CODE_TMPDIR:-/tmp}"
-context_cache="${cache_dir}/claude-context-cache"
 git_cache="${cache_dir}/claude-git-cache"
 usage_cache="${cache_dir}/claude-usage-cache"
 pr_cache="${cache_dir}/claude-pr-cache"
@@ -69,9 +68,7 @@ model_display=""
 project_dir=""
 cwd=""
 context_size=200000
-used_pct=0
-session_id=""
-current_usage=0
+used_pct=""
 lines_added=0
 lines_removed=0
 duration_ms=0
@@ -84,27 +81,11 @@ eval "$(echo "$input" | jq -r '
   @sh "cwd=\(.cwd // "")",
   @sh "context_size=\(.context_window.context_window_size // 200000)",
   @sh "used_pct=\(.context_window.used_percentage // "")",
-  @sh "session_id=\(.session_id // "")",
   @sh "lines_added=\(.cost.total_lines_added // 0)",
   @sh "lines_removed=\(.cost.total_lines_removed // 0)",
   @sh "duration_ms=\(.cost.total_duration_ms // 0)",
-  @sh "total_cost=\(.cost.total_cost_usd // 0)",
-  @sh "current_usage=\(
-    (.context_window.current_usage.input_tokens // 0) +
-    (.context_window.current_usage.output_tokens // 0) +
-    (.context_window.current_usage.cache_creation_input_tokens // 0) +
-    (.context_window.current_usage.cache_read_input_tokens // 0)
-  )"
+  @sh "total_cost=\(.cost.total_cost_usd // 0)"
 ' 2>/dev/null)"
-
-# --- Use cached context if current parse returned zero AND same session ---
-if [[ $current_usage -eq 0 && -f "$context_cache" ]]; then
-  source "$context_cache" 2>/dev/null
-  # Only use cache if session matches; otherwise clear to trigger "no data" state
-  [[ "$cached_session_id" != "$session_id" ]] && { current_usage=0; used_pct=""; }
-elif [[ $current_usage -gt 0 ]]; then
-  echo "cached_session_id='$session_id'; current_usage=$current_usage; context_size=$context_size; used_pct=$used_pct" > "$context_cache"
-fi
 
 # --- Helper Functions ---
 
@@ -367,16 +348,25 @@ if [[ "$STATUSLINE_SHOW_PR" == "true" && -n "$project_dir" && -n "$git_branch" ]
 fi
 
 # --- Context Calculation ---
+# IMPORTANT: used_percentage is the authoritative source maintained by Claude Code.
+# current_usage fields are cumulative session totals and NOT updated after /compact.
 ctx_no_data=false
-if [[ $current_usage -gt 0 && $context_size -gt 0 ]]; then
-  ctx_pct=$((current_usage * 100 / context_size))
-elif [[ -n "$used_pct" ]]; then
+ctx_pct=0
+
+if [[ -n "$used_pct" && "$used_pct" != "null" ]]; then
+  # PRIMARY: Use Claude Code's authoritative used_percentage
   ctx_pct=${used_pct%.*}
-  current_usage=$((ctx_pct * context_size / 100))
+  [[ ! "$ctx_pct" =~ ^[0-9]+$ ]] && ctx_pct=0
 else
-  # No data available (fresh session start)
-  ctx_pct=0
+  # No percentage data available (fresh session before first API call)
   ctx_no_data=true
+fi
+
+# Calculate estimated token count from percentage for display
+if [[ "$ctx_no_data" == "false" && $context_size -gt 0 ]]; then
+  estimated_tokens=$((ctx_pct * context_size / 100))
+else
+  estimated_tokens=0
 fi
 
 # Clamp context percentage to 0-100 range
@@ -396,7 +386,7 @@ ctx_color=$(get_semantic_color "$ctx_pct")
 if [[ "$ctx_no_data" == "true" ]]; then
   ctx_tokens="—"
 else
-  ctx_tokens=$(format_tokens "$current_usage")
+  ctx_tokens=$(format_tokens "$estimated_tokens")
 fi
 ctx_max=$(format_tokens "$context_size")
 
