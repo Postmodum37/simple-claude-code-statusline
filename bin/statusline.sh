@@ -69,10 +69,11 @@ project_dir=""
 cwd=""
 context_size=200000
 used_pct=""
-lines_added=0
-lines_removed=0
 duration_ms=0
 total_cost=0
+cache_read_tokens=0
+total_input_tokens=0
+total_output_tokens=0
 
 eval "$(echo "$input" | jq -r '
   @sh "model_id=\(.model.id // "")",
@@ -81,10 +82,11 @@ eval "$(echo "$input" | jq -r '
   @sh "cwd=\(.cwd // "")",
   @sh "context_size=\(.context_window.context_window_size // 200000)",
   @sh "used_pct=\(.context_window.used_percentage // "")",
-  @sh "lines_added=\(.cost.total_lines_added // 0)",
-  @sh "lines_removed=\(.cost.total_lines_removed // 0)",
   @sh "duration_ms=\(.cost.total_duration_ms // 0)",
-  @sh "total_cost=\(.cost.total_cost_usd // 0)"
+  @sh "total_cost=\(.cost.total_cost_usd // 0)",
+  @sh "cache_read_tokens=\(.context_window.current_usage.cache_read_input_tokens // 0)",
+  @sh "total_input_tokens=\(.context_window.total_input_tokens // 0)",
+  @sh "total_output_tokens=\(.context_window.total_output_tokens // 0)"
 ' 2>/dev/null)"
 
 # --- Helper Functions ---
@@ -164,6 +166,22 @@ build_bar() {
   echo "$bar"
 }
 
+# Format TPM (Tokens Per Minute) for display - pure bash, no bc
+format_tpm() {
+  local tpm=$1
+  if [[ $tpm -ge 1000000 ]]; then
+    local whole=$((tpm / 1000000))
+    local frac=$(((tpm % 1000000) / 100000))
+    echo "${whole}.${frac}m"
+  elif [[ $tpm -ge 1000 ]]; then
+    local whole=$((tpm / 1000))
+    local frac=$(((tpm % 1000) / 100))
+    echo "${whole}.${frac}k"
+  else
+    echo "$tpm"
+  fi
+}
+
 # --- Model Display (bash 3.2 compatible - no BASH_REMATCH) ---
 model_short=""
 case "$model_id" in
@@ -204,28 +222,56 @@ fi
 
 [[ -n "$version_extracted" ]] && model_short="$model_short $version_extracted"
 
-# --- Directory Display (no subshells) ---
+# --- Directory Display (fish-style) ---
+# Inspired by fish shell and starship: abbreviate intermediate dirs to first char
+# If in git repo: show repo name + relative path
+# Otherwise: fish-style ~/W/p/current-dir
 dir_display=""
 if [[ -n "$cwd" ]]; then
-  dir_display="${cwd/#$HOME/~}"
+  if [[ -n "$project_dir" && "$cwd" == "$project_dir"* ]]; then
+    # In a git repo - show repo name + relative path within repo
+    repo_name=$(basename "$project_dir")
+    if [[ "$cwd" == "$project_dir" ]]; then
+      # At repo root
+      dir_display="$repo_name"
+    else
+      # Inside repo - show repo/relative/path
+      relative_path="${cwd#$project_dir/}"
+      dir_display="${repo_name}/${relative_path}"
+    fi
+  else
+    # Not in git repo - use fish-style abbreviation
+    path_with_tilde="${cwd/#$HOME/~}"
 
-  # Count segments using parameter expansion
-  local_path="$dir_display"
-  segment_count=0
-  while [[ "$local_path" == */* ]]; do
-    local_path="${local_path#*/}"
-    ((segment_count++))
-  done
-  ((segment_count++))
-
-  if [[ $segment_count -gt 3 ]]; then
-    # Get last 3 segments safely
+    # Split into parts
     oldIFS="$IFS"
-    IFS='/' read -ra parts <<< "$dir_display"
+    IFS='/' read -ra parts <<< "$path_with_tilde"
     IFS="$oldIFS"
+
     len=${#parts[@]}
-    if [[ $len -ge 3 ]]; then
-      dir_display="…/${parts[$((len-3))]}/${parts[$((len-2))]}/${parts[$((len-1))]}"
+    if [[ $len -le 2 ]]; then
+      # Short path, show as-is
+      dir_display="$path_with_tilde"
+    else
+      # Abbreviate all but the last segment
+      abbreviated=""
+      for ((i=0; i<len-1; i++)); do
+        part="${parts[$i]}"
+        if [[ -z "$part" ]]; then
+          continue  # Skip empty parts (leading /)
+        elif [[ "$part" == "~" ]]; then
+          abbreviated+="~"
+        elif [[ "$part" == .* ]]; then
+          # Hidden dir: keep dot + first char (e.g., .config -> .c)
+          abbreviated+="${part:0:2}"
+        else
+          # Regular dir: first char only
+          abbreviated+="${part:0:1}"
+        fi
+        abbreviated+="/"
+      done
+      # Add full last segment (current directory)
+      dir_display="${abbreviated}${parts[$((len-1))]}"
     fi
   fi
 fi
@@ -233,11 +279,14 @@ fi
 # --- Git Display (cached for 5 seconds) ---
 git_branch=""
 git_status=""
+git_worktree=""
 added=0
 modified=0
 deleted=0
 ahead=0
 behind=0
+lines_added=0
+lines_removed=0
 
 if [[ -n "$project_dir" ]]; then
   git_cache_age=999
@@ -250,6 +299,14 @@ if [[ -n "$project_dir" ]]; then
     if git --no-optional-locks -C "$project_dir" rev-parse --git-dir &>/dev/null; then
       git_branch=$(git --no-optional-locks -C "$project_dir" rev-parse --abbrev-ref HEAD 2>/dev/null)
       [[ ${#git_branch} -gt 20 ]] && git_branch="${git_branch:0:17}…"
+
+      # Check if in a linked worktree (.git is a file, not a directory)
+      git_worktree=""
+      git_dot_file="${project_dir}/.git"
+      if [[ -f "$git_dot_file" ]]; then
+        # In a linked worktree - extract worktree name from directory
+        git_worktree=$(basename "$project_dir")
+      fi
 
       git_porcelain=$(git --no-optional-locks -C "$project_dir" status --porcelain 2>/dev/null)
 
@@ -278,8 +335,23 @@ if [[ -n "$project_dir" ]]; then
       ahead=$(git --no-optional-locks -C "$project_dir" rev-list --count @{u}..HEAD 2>/dev/null || echo 0)
       behind=$(git --no-optional-locks -C "$project_dir" rev-list --count HEAD..@{u} 2>/dev/null || echo 0)
 
+      # Get actual lines changed from git diff (staged + unstaged)
+      # NOTE: This shows current uncommitted changes, not cumulative session edits.
+      # This is intentional - it reflects the actual state of the working tree.
+      lines_added=0
+      lines_removed=0
+      diff_numstat=$(git --no-optional-locks -C "$project_dir" diff --numstat HEAD 2>/dev/null)
+      if [[ -n "$diff_numstat" ]]; then
+        while IFS=$'\t' read -r add rem _; do
+          # Skip binary files (shown as -)
+          [[ "$add" == "-" ]] && continue
+          ((lines_added += add))
+          ((lines_removed += rem))
+        done <<< "$diff_numstat"
+      fi
+
       # Save to cache
-      echo "git_branch='$git_branch'; added=$added; modified=$modified; deleted=$deleted; ahead=$ahead; behind=$behind" > "$git_cache"
+      echo "git_branch='$git_branch'; git_worktree='$git_worktree'; added=$added; modified=$modified; deleted=$deleted; ahead=$ahead; behind=$behind; lines_added=$lines_added; lines_removed=$lines_removed" > "$git_cache"
     fi
   else
     # Use cached git data
@@ -373,6 +445,22 @@ fi
 [[ $ctx_pct -lt 0 ]] && ctx_pct=0
 [[ $ctx_pct -gt 100 ]] && ctx_pct=100
 
+# --- Auto-compact awareness ---
+# Check if auto-compact is enabled (default) or disabled
+auto_compact_enabled=true
+claude_json_path="${HOME}/.claude.json"
+if [[ -f "$claude_json_path" ]]; then
+  # Use proper jq expression that handles boolean false correctly
+  # (the // operator treats false as falsy, so we use if/else)
+  auto_compact_setting=$(jq -r 'if has("autoCompactEnabled") then .autoCompactEnabled | tostring else "null" end' "$claude_json_path" 2>/dev/null)
+  if [[ "$auto_compact_setting" == "false" ]]; then
+    auto_compact_enabled=false
+  fi
+fi
+
+# Use standard semantic coloring based on absolute percentage
+ctx_color=$(get_semantic_color "$ctx_pct")
+
 # Progress bar (pure bash, no subshells)
 bar_width=8
 filled=$((ctx_pct * bar_width / 100))
@@ -382,13 +470,34 @@ empty=$((bar_width - filled))
 
 bar=$(build_bar "$filled" "$empty")
 
-ctx_color=$(get_semantic_color "$ctx_pct")
 if [[ "$ctx_no_data" == "true" ]]; then
   ctx_tokens="—"
 else
   ctx_tokens=$(format_tokens "$estimated_tokens")
 fi
 ctx_max=$(format_tokens "$context_size")
+
+# --- Cache Token Display ---
+cache_display=""
+if [[ $cache_read_tokens -gt 0 ]]; then
+  cache_formatted=$(format_tokens "$cache_read_tokens")
+  cache_display=" ${C_MUTED}(${cache_formatted} cached)${C_RESET}"
+fi
+
+# --- TPM (Tokens Per Minute) ---
+tpm_display=""
+# Only show TPM if session is > 30 seconds (to avoid noisy/inaccurate values)
+if [[ $duration_ms -gt 30000 ]]; then
+  total_tokens=$((total_input_tokens + total_output_tokens))
+  if [[ $total_tokens -gt 0 ]]; then
+    # Calculate TPM: tokens / (duration_ms / 60000) = tokens * 60000 / duration_ms
+    tpm=$((total_tokens * 60000 / duration_ms))
+    if [[ $tpm -gt 0 ]]; then
+      tpm_formatted=$(format_tpm "$tpm")
+      tpm_display="${C_MUTED}${tpm_formatted} TPM${C_RESET}"
+    fi
+  fi
+fi
 
 # --- Usage Stats (cached 60s, errors cached 15s) ---
 usage_5h=""
@@ -400,13 +509,13 @@ if [[ -f "$usage_cache" ]]; then
   usage_cache_age=$(( NOW - $(stat_mtime "$usage_cache") ))
 fi
 
-# Check if cache contains an error (shorter TTL for errors)
-usage_is_error=false
+# Read cache content once, check if it's an error (shorter TTL for errors)
+usage_cache_content=""
+usage_is_error=true
 if [[ -f "$usage_cache" ]]; then
-  # Quick check: valid response has "five_hour" key
-  if ! grep -q '"five_hour"' "$usage_cache" 2>/dev/null; then
-    usage_is_error=true
-  fi
+  usage_cache_content=$(<"$usage_cache")
+  # Valid response has "five_hour" key
+  [[ "$usage_cache_content" == *'"five_hour"'* ]] && usage_is_error=false
 fi
 
 # Refresh if: cache expired (60s) OR error cache expired (15s)
@@ -424,7 +533,7 @@ if [[ $usage_cache_age -gt 60 ]] || { [[ "$usage_is_error" == "true" ]] && [[ $u
   fi
 fi
 
-if [[ -f "$usage_cache" ]] && grep -q '"five_hour"' "$usage_cache" 2>/dev/null; then
+if [[ "$usage_is_error" == "false" ]]; then
   # Single jq call for all usage data
   eval "$(jq -r '
     @sh "five_util=\(.five_hour.utilization // 0)",
@@ -495,7 +604,8 @@ if [[ -n "$total_cost" && "$total_cost" != "0" ]]; then
     cost_display="${C_MUTED}\$${cost_int}${C_RESET}"
   else
     # < $10 -> show with decimals: $0.23 or $1.50
-    cost_rounded=$(printf "%.2f" "$total_cost")
+    # Use LC_ALL=C for locale-independent formatting
+    cost_rounded=$(LC_ALL=C awk -v cost="$total_cost" 'BEGIN {printf "%.2f", cost}')
     cost_display="${C_MUTED}\$${cost_rounded}${C_RESET}"
   fi
 fi
@@ -505,15 +615,29 @@ sep=" ${C_MUTED}│${C_RESET} "
 
 row1="${C_ACCENT}${model_short}${C_RESET}"
 [[ -n "$dir_display" ]] && row1+="${sep}${C_WHITE}${dir_display}${C_RESET}"
-[[ -n "$git_branch" ]] && row1+="${sep}${C_ACCENT}${git_branch}${C_RESET}${git_status}"
+if [[ -n "$git_branch" ]]; then
+  git_display="${C_ACCENT}${git_branch}${C_RESET}"
+  [[ -n "$git_worktree" ]] && git_display+=" ${C_MUTED}[wt:${git_worktree}]${C_RESET}"
+  git_display+="${git_status}"
+  row1+="${sep}${git_display}"
+fi
 [[ -n "$pr_display" ]] && row1+="${sep}${pr_display}"
 [[ -n "$lines_display" ]] && row1+="${sep}${lines_display}"
 
-row2="${ctx_color}${bar} ${ctx_tokens}/${ctx_max}${C_RESET}"
+# Build context display with optional auto-compact indicator
+ctx_display="${ctx_color}${bar} ${ctx_tokens}/${ctx_max}${C_RESET}"
+# Show auto-compact indicator when enabled (but don't guess the threshold)
+if [[ "$auto_compact_enabled" == "true" && "$ctx_no_data" == "false" ]]; then
+  ctx_display+=" ${C_MUTED}(↻)${C_RESET}"
+fi
+ctx_display+="${cache_display}"
+
+row2="${ctx_display}"
 [[ -n "$usage_5h" ]] && row2+="${sep}${usage_5h}"
 [[ -n "$usage_7d" ]] && row2+="${sep}${usage_7d}"
 [[ -n "$usage_extra" ]] && row2+="${sep}${usage_extra}"
 [[ -n "$cost_display" ]] && row2+="${sep}${cost_display}"
 row2+="${sep}${C_MUTED}${duration_display}${C_RESET}"
+[[ -n "$tpm_display" ]] && row2+="${sep}${tpm_display}"
 
 printf "%b\n%b" "$row1" "$row2"

@@ -47,6 +47,7 @@ The script uses:
 - macOS `security` command - OAuth token retrieval from keychain
 - Platform-specific: `stat -f %m` (macOS) or `stat -c %Y` (Linux) for cache age
 - Platform-specific: `date -j -f` (macOS) or `date -d` (Linux) for ISO date parsing
+- `~/.claude.json` - Auto-compact setting detection
 
 ## Configuration
 
@@ -62,6 +63,10 @@ Environment variables can customize behavior:
 - Compatible with bash 3.2 (macOS default) - uses `=~` without capture groups to avoid `BASH_REMATCH`
 - Cross-platform: auto-detects macOS vs Linux for stat/date commands
 - PR merged status uses purple color to match Claude Code 2.1.23+ styling
+- Lines changed shows current uncommitted changes (`git diff HEAD`), not cumulative session edits
+- TPM (Tokens Per Minute) displayed after 30+ seconds of session activity
+- Cache token count displayed when prompt caching is active
+- Auto-compact indicator `(↻)` shown when auto-compact is enabled
 
 ## Plugin Development
 
