@@ -174,22 +174,6 @@ build_bar() {
   echo "$bar"
 }
 
-# Format TPM (Tokens Per Minute) for display - pure bash, no bc
-format_tpm() {
-  local tpm=$1
-  if [[ $tpm -ge 1000000 ]]; then
-    local whole=$((tpm / 1000000))
-    local frac=$(((tpm % 1000000) / 100000))
-    echo "${whole}.${frac}m"
-  elif [[ $tpm -ge 1000 ]]; then
-    local whole=$((tpm / 1000))
-    local frac=$(((tpm % 1000) / 100))
-    echo "${whole}.${frac}k"
-  else
-    echo "$tpm"
-  fi
-}
-
 # --- Model Display (bash 3.2 compatible - no BASH_REMATCH) ---
 model_short=""
 case "$model_id" in
@@ -485,21 +469,6 @@ else
 fi
 ctx_max=$(format_tokens "$context_size")
 
-# --- TPM (Tokens Per Minute) ---
-tpm_display=""
-# Only show TPM if session is > 30 seconds (to avoid noisy/inaccurate values)
-if [[ $duration_ms -gt 30000 ]]; then
-  total_tokens=$((total_input_tokens + total_output_tokens))
-  if [[ $total_tokens -gt 0 ]]; then
-    # Calculate TPM: tokens / (duration_ms / 60000) = tokens * 60000 / duration_ms
-    tpm=$((total_tokens * 60000 / duration_ms))
-    if [[ $tpm -gt 0 ]]; then
-      tpm_formatted=$(format_tpm "$tpm")
-      tpm_display="${C_MUTED}${tpm_formatted} TPM${C_RESET}"
-    fi
-  fi
-fi
-
 # --- Usage Stats (cached 60s, errors cached 15s) ---
 usage_5h=""
 usage_7d=""
@@ -638,6 +607,5 @@ row2="${ctx_display}"
 [[ -n "$usage_extra" ]] && row2+="${sep}${usage_extra}"
 [[ -n "$cost_display" ]] && row2+="${sep}${cost_display}"
 row2+="${sep}${C_MUTED}${duration_display}${C_RESET}"
-[[ -n "$tpm_display" ]] && row2+="${sep}${tpm_display}"
 
 printf "%b\n%b" "$row1" "$row2"

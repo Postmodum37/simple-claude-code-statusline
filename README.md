@@ -8,41 +8,71 @@ A minimal, hackable two-line statusline for Claude Code.
 
 ## Features
 
-**Line 1:** Model | Directory | Git branch + status | Lines changed
-**Line 2:** Context usage bar | 5h rate limit | 7d rate limit | Session duration
+**Line 1:** Model | Directory | Git branch + status | PR status | Lines changed
+**Line 2:** Context bar | 5h rate limit | 7d rate limit | Cost | Duration
 
 - Tokyo Night color scheme
 - Context usage with color-coded progress bar
 - Rate limit tracking with time until reset
-- Git branch with added/modified/deleted counts
-- Session lines changed (+added/-removed)
+- Git branch with added/modified/deleted counts and ahead/behind tracking
+- PR status with review state (draft/approved/changes/pending/merged)
+- Git worktree support with `[wt:name]` indicator
+- Session cost tracking ($X.XX)
+- Auto-compact indicator (↻) when enabled
+- Lines changed shows current uncommitted changes (not session total)
 - Cross-platform (macOS and Linux)
 - No build step - just bash
 
 ### Context Usage Colors
 
-| Usage | Color | Example |
+| Usage | Color | Meaning |
 |-------|-------|---------|
-| 0-50% | Green | ![Context bar at 0-50% in green](screenshot-green.png) |
-| 51-75% | Yellow | ![Context bar at 51-75% in yellow](screenshot-yellow.png) |
-| 76-90% | Orange | ![Context bar at 76-90% in orange](screenshot-orange.png) |
-| 91%+ | Red | ![Context bar at 91%+ in red](screenshot-red.png) |
+| 0-50% | Green | Plenty of context remaining |
+| 51-75% | Yellow | Getting full |
+| 76-90% | Orange | Consider summarizing |
+| 91%+ | Red | Near limit |
 
-### Git Status
+### PR Status
 
-Shows branch name with file counts:
+When in a git repo with an open PR, shows review state:
 
-![Git branch with added, modified, and deleted file counts](screenshot-git.png)
+| Indicator | Meaning |
+|-----------|---------|
+| `◌ draft` | Draft PR (gray) |
+| `● pending` | Awaiting review (yellow) |
+| `● approved` | Approved (green) |
+| `● changes` | Changes requested (red) |
+| `● merged` | Merged (purple) |
+
+Set `STATUSLINE_SHOW_PR=false` to hide (useful with Claude Code 2.1.20+ native PR indicator).
+
+### Git Features
+
+![Git branch with status indicators](screenshot-git.png)
+
+- **Branch name** with file status counts (✚added/●modified/✖deleted)
+- **Ahead/behind** tracking: `↑2` commits ahead, `↓1` behind upstream
+- **Worktree indicator**: `[wt:feature-name]` when in a linked worktree
+- **Lines changed**: `+44/-14` shows current uncommitted changes
+
+### Model Display
+
+![Sonnet model with yellow context bar](screenshot-sonnet.png)
+
+Shows abbreviated model names: Opus 4.5, Sonnet 4, Haiku, etc.
 
 ## Requirements
 
 - `jq` - JSON parsing
 - `curl` - Rate limit API calls
 - `git` - Repository status (optional)
+- `gh` - GitHub CLI for PR status (optional)
 
-Install jq on macOS:
+On macOS, the script also uses the `security` command to retrieve OAuth tokens from keychain.
+
+Install dependencies on macOS:
 ```sh
-brew install jq
+brew install jq gh
 ```
 
 ## Installation
@@ -115,6 +145,12 @@ row2="$seg_context"
 [[ -n "$usage_7d" ]] && row2+="${sep}${seg_usage_7d}"
 row2+="${sep}${seg_duration}"
 ```
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `STATUSLINE_SHOW_PR` | `true` | Set to `false` to hide PR status |
 
 ## JSON Input Reference
 

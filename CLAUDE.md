@@ -37,6 +37,12 @@ Test manually by piping sample JSON:
 echo '{"model":{"id":"claude-opus-4-5-20251101"},"cwd":"/tmp","context_window":{"used_percentage":42,"context_window_size":200000}}' | ./bin/statusline.sh
 ```
 
+Note: Include `workspace.project_dir` in JSON for git info to display.
+
+## Screenshots
+
+Do NOT use termshot/vhs for screenshots - they render fonts incorrectly. Ask user to take manual screenshots from their terminal after running test commands with different mock JSON states.
+
 ## External Dependencies
 
 The script uses:
@@ -64,7 +70,6 @@ Environment variables can customize behavior:
 - Cross-platform: auto-detects macOS vs Linux for stat/date commands
 - PR merged status uses purple color to match Claude Code 2.1.23+ styling
 - Lines changed shows current uncommitted changes (`git diff HEAD`), not cumulative session edits
-- TPM (Tokens Per Minute) displayed after 30+ seconds of session activity
 - Cache token count displayed when prompt caching is active
 - Auto-compact indicator `(↻)` shown when auto-compact is enabled
 
