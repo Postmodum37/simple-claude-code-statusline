@@ -55,11 +55,11 @@ fi
 # --- Read JSON input ---
 input=$(cat)
 
-# --- Cache files (respect CLAUDE_CODE_TMPDIR if set) ---
+# --- Cache directory (respect CLAUDE_CODE_TMPDIR if set) ---
 cache_dir="${CLAUDE_CODE_TMPDIR:-/tmp}"
-git_cache="${cache_dir}/claude-git-cache"
+# Usage cache is global (user-level rate limit data, not project-specific)
 usage_cache="${cache_dir}/claude-usage-cache"
-pr_cache="${cache_dir}/claude-pr-cache"
+# Note: git_cache and pr_cache are defined after JSON extraction (project-specific)
 
 # --- Extract all fields with single jq call ---
 # Initialize all variables with defaults first
@@ -86,6 +86,16 @@ eval "$(echo "$input" | jq -r '
   @sh "total_input_tokens=\(.context_window.total_input_tokens // 0)",
   @sh "total_output_tokens=\(.context_window.total_output_tokens // 0)"
 ' 2>/dev/null)"
+
+# --- Project-specific cache files (use hash of project_dir for isolation) ---
+if [[ -n "$project_dir" ]]; then
+  project_hash=$(echo -n "$project_dir" | cksum | cut -d' ' -f1)
+  git_cache="${cache_dir}/claude-git-cache-${project_hash}"
+  pr_cache="${cache_dir}/claude-pr-cache-${project_hash}"
+else
+  git_cache="${cache_dir}/claude-git-cache"
+  pr_cache="${cache_dir}/claude-pr-cache"
+fi
 
 # --- Helper Functions ---
 
