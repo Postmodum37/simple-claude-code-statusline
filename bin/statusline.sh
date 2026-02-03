@@ -71,7 +71,6 @@ context_size=200000
 used_pct=""
 duration_ms=0
 total_cost=0
-cache_read_tokens=0
 total_input_tokens=0
 total_output_tokens=0
 
@@ -84,7 +83,6 @@ eval "$(echo "$input" | jq -r '
   @sh "used_pct=\(.context_window.used_percentage // "")",
   @sh "duration_ms=\(.cost.total_duration_ms // 0)",
   @sh "total_cost=\(.cost.total_cost_usd // 0)",
-  @sh "cache_read_tokens=\(.context_window.current_usage.cache_read_input_tokens // 0)",
   @sh "total_input_tokens=\(.context_window.total_input_tokens // 0)",
   @sh "total_output_tokens=\(.context_window.total_output_tokens // 0)"
 ' 2>/dev/null)"
@@ -477,13 +475,6 @@ else
 fi
 ctx_max=$(format_tokens "$context_size")
 
-# --- Cache Token Display ---
-cache_display=""
-if [[ $cache_read_tokens -gt 0 ]]; then
-  cache_formatted=$(format_tokens "$cache_read_tokens")
-  cache_display=" ${C_MUTED}(${cache_formatted} cached)${C_RESET}"
-fi
-
 # --- TPM (Tokens Per Minute) ---
 tpm_display=""
 # Only show TPM if session is > 30 seconds (to avoid noisy/inaccurate values)
@@ -630,7 +621,6 @@ ctx_display="${ctx_color}${bar} ${ctx_tokens}/${ctx_max}${C_RESET}"
 if [[ "$auto_compact_enabled" == "true" && "$ctx_no_data" == "false" ]]; then
   ctx_display+=" ${C_MUTED}(↻)${C_RESET}"
 fi
-ctx_display+="${cache_display}"
 
 row2="${ctx_display}"
 [[ -n "$usage_5h" ]] && row2+="${sep}${usage_5h}"
