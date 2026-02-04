@@ -22,16 +22,6 @@ C_GIT_DEL="\033[38;5;196m"    # Red for deleted
 C_GIT_AHEAD="\033[38;5;81m"   # Cyan for ahead
 C_GIT_BEHIND="\033[38;5;208m" # Orange for behind
 
-# PR status colors (matching Claude Code's prompt footer)
-C_PR_APPROVED="\033[38;5;114m"   # Green for approved
-C_PR_PENDING="\033[38;5;214m"    # Yellow for pending
-C_PR_CHANGES="\033[38;5;196m"    # Red for changes requested
-C_PR_DRAFT="\033[38;5;146m"      # Muted for draft
-C_PR_MERGED="\033[38;5;135m"     # Purple for merged (matching Claude Code 2.1.23+)
-
-# --- Configuration (can be overridden via environment variables) ---
-STATUSLINE_SHOW_PR="${STATUSLINE_SHOW_PR:-true}"  # Set to "false" to hide PR status (useful if using Claude Code's native PR indicator)
-
 # --- Cache current timestamp (avoid multiple date calls) ---
 NOW=$(date +%s)
 
@@ -59,7 +49,7 @@ input=$(cat)
 cache_dir="${CLAUDE_CODE_TMPDIR:-/tmp}"
 # Usage cache is global (user-level rate limit data, not project-specific)
 usage_cache="${cache_dir}/claude-usage-cache"
-# Note: git_cache and pr_cache are defined after JSON extraction (project-specific)
+# Note: git_cache is defined after JSON extraction (project-specific)
 
 # --- Extract all fields with single jq call ---
 # Initialize all variables with defaults first
@@ -91,10 +81,8 @@ eval "$(echo "$input" | jq -r '
 if [[ -n "$project_dir" ]]; then
   project_hash=$(echo -n "$project_dir" | cksum | cut -d' ' -f1)
   git_cache="${cache_dir}/claude-git-cache-${project_hash}"
-  pr_cache="${cache_dir}/claude-pr-cache-${project_hash}"
 else
   git_cache="${cache_dir}/claude-git-cache"
-  pr_cache="${cache_dir}/claude-pr-cache"
 fi
 
 # --- Helper Functions ---
@@ -358,59 +346,6 @@ if [[ -n "$project_dir" ]]; then
   [[ $behind -gt 0 ]] && git_status+=" ${C_GIT_BEHIND}↓${behind}${C_RESET}"
 fi
 
-# --- PR Status (cached 30s) ---
-pr_status=""
-pr_display=""
-
-if [[ "$STATUSLINE_SHOW_PR" == "true" && -n "$project_dir" && -n "$git_branch" ]]; then
-  pr_cache_age=999
-  if [[ -f "$pr_cache" ]]; then
-    pr_cache_age=$(( NOW - $(stat_mtime "$pr_cache") ))
-  fi
-
-  # Refresh PR cache every 30 seconds
-  if [[ $pr_cache_age -gt 30 ]]; then
-    # Check for gh CLI and get PR info for current branch
-    if command -v gh &>/dev/null; then
-      pr_json=$(gh pr view --json state,reviewDecision,isDraft 2>/dev/null)
-      if [[ -n "$pr_json" ]]; then
-        echo "$pr_json" > "$pr_cache"
-      else
-        # No PR for this branch - cache empty result
-        echo '{"state":"NONE"}' > "$pr_cache"
-      fi
-    fi
-  fi
-
-  # Parse cached PR status
-  if [[ -f "$pr_cache" ]]; then
-    eval "$(jq -r '
-      @sh "pr_state=\(.state // "NONE")",
-      @sh "pr_review=\(.reviewDecision // "")",
-      @sh "pr_draft=\(.isDraft // false)"
-    ' "$pr_cache" 2>/dev/null)" || {
-      pr_state="NONE"
-      pr_review=""
-      pr_draft=false
-    }
-
-    # Build PR status display (colored dot + label)
-    if [[ "$pr_state" != "NONE" ]]; then
-      if [[ "$pr_draft" == "true" ]]; then
-        pr_display="${C_PR_DRAFT}◌ draft${C_RESET}"
-      elif [[ "$pr_review" == "APPROVED" ]]; then
-        pr_display="${C_PR_APPROVED}● approved${C_RESET}"
-      elif [[ "$pr_review" == "CHANGES_REQUESTED" ]]; then
-        pr_display="${C_PR_CHANGES}● changes${C_RESET}"
-      elif [[ "$pr_state" == "OPEN" ]]; then
-        pr_display="${C_PR_PENDING}● pending${C_RESET}"
-      elif [[ "$pr_state" == "MERGED" ]]; then
-        pr_display="${C_PR_MERGED}● merged${C_RESET}"
-      fi
-    fi
-  fi
-fi
-
 # --- Context Calculation ---
 # IMPORTANT: used_percentage is the authoritative source maintained by Claude Code.
 # current_usage fields are cumulative session totals and NOT updated after /compact.
@@ -591,7 +526,6 @@ if [[ -n "$git_branch" ]]; then
   git_display+="${git_status}"
   row1+="${sep}${git_display}"
 fi
-[[ -n "$pr_display" ]] && row1+="${sep}${pr_display}"
 [[ -n "$lines_display" ]] && row1+="${sep}${lines_display}"
 
 # Build context display with optional auto-compact indicator

@@ -27,7 +27,7 @@ Claude Code pipes JSON to the script containing:
 - `session_id` - For session duration tracking
 
 The script outputs two lines of ANSI-escaped text:
-1. Model | Directory | Git branch + status | PR status | Lines changed
+1. Model | Directory | Git branch + status | Lines changed
 2. Context bar | 5h rate limit | 7d rate limit | Cost | Duration
 
 ## Testing
@@ -49,26 +49,18 @@ The script uses:
 - `jq` - JSON parsing (required)
 - `curl` - Rate limit API calls
 - `git` - Repository status
-- `gh` - GitHub CLI for PR status (optional - PR status hidden if not installed)
 - macOS `security` command - OAuth token retrieval from keychain
 - Platform-specific: `stat -f %m` (macOS) or `stat -c %Y` (Linux) for cache age
 - Platform-specific: `date -j -f` (macOS) or `date -d` (Linux) for ISO date parsing
 - `~/.claude.json` - Auto-compact setting detection
 
-## Configuration
-
-Environment variables can customize behavior:
-
-- `STATUSLINE_SHOW_PR` - Set to `false` to hide PR status (default: `true`). Useful if you prefer Claude Code's native PR indicator (added in 2.1.20+).
-
 ## Key Implementation Notes
 
 - Uses `--no-optional-locks` with git commands to avoid conflicts
-- Caches to `${CLAUDE_CODE_TMPDIR:-/tmp}/claude-*` (rate limit: 60s TTL, 15s for errors; git: 5s TTL; PR: 30s TTL)
+- Caches to `${CLAUDE_CODE_TMPDIR:-/tmp}/claude-*` (rate limit: 60s TTL, 15s for errors; git: 5s TTL)
 - Colors use Tokyo Night palette defined at top of script
 - Compatible with bash 3.2 (macOS default) - uses `=~` without capture groups to avoid `BASH_REMATCH`
 - Cross-platform: auto-detects macOS vs Linux for stat/date commands
-- PR merged status uses purple color to match Claude Code 2.1.23+ styling
 - Lines changed shows current uncommitted changes (`git diff HEAD`), not cumulative session edits
 - Cache token count displayed when prompt caching is active
 - Auto-compact indicator `(↻)` shown when auto-compact is enabled
