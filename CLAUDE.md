@@ -58,6 +58,7 @@ The script uses:
 
 ## Key Implementation Notes
 
+- Adding a new JSON field requires updates in 3 places: defaults (before `eval`), jq `@sh` block (last line has no trailing comma), and CLAUDE.md "Available JSON fields" section
 - Uses `--no-optional-locks` with git commands to avoid conflicts
 - Caches to `${CLAUDE_CODE_TMPDIR:-/tmp}/claude-*` (rate limit: 60s TTL, 15s for errors; git: 5s TTL)
 - Colors use Tokyo Night palette defined at top of script
