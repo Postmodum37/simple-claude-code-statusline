@@ -9,7 +9,7 @@
     {
       "name": "simple-statusline",
       "description": "A simple, hackable two-line statusline showing model, git status, context usage, and rate limits",
-      "version": "1.7.0",
+      "version": "1.8.0",
       "source": {
         "source": "url",
         "url": "https://github.com/Postmodum37/simple-claude-code-statusline.git"

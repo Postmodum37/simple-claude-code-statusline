@@ -63,6 +63,9 @@ duration_ms=0
 total_cost=0
 total_input_tokens=0
 total_output_tokens=0
+session_lines_added=0
+session_lines_removed=0
+agent_name=""
 
 eval "$(echo "$input" | jq -r '
   @sh "model_id=\(.model.id // "")",
@@ -74,7 +77,10 @@ eval "$(echo "$input" | jq -r '
   @sh "duration_ms=\(.cost.total_duration_ms // 0)",
   @sh "total_cost=\(.cost.total_cost_usd // 0)",
   @sh "total_input_tokens=\(.context_window.total_input_tokens // 0)",
-  @sh "total_output_tokens=\(.context_window.total_output_tokens // 0)"
+  @sh "total_output_tokens=\(.context_window.total_output_tokens // 0)",
+  @sh "session_lines_added=\(.cost.total_lines_added // 0)",
+  @sh "session_lines_removed=\(.cost.total_lines_removed // 0)",
+  @sh "agent_name=\(.agent.name // "")"
 ' 2>/dev/null)"
 
 # --- Project-specific cache files (use hash of project_dir for isolation) ---
@@ -265,9 +271,6 @@ modified=0
 deleted=0
 ahead=0
 behind=0
-lines_added=0
-lines_removed=0
-
 if [[ -n "$project_dir" ]]; then
   git_cache_age=999
   if [[ -f "$git_cache" ]]; then
@@ -315,23 +318,8 @@ if [[ -n "$project_dir" ]]; then
       ahead=$(git --no-optional-locks -C "$project_dir" rev-list --count @{u}..HEAD 2>/dev/null || echo 0)
       behind=$(git --no-optional-locks -C "$project_dir" rev-list --count HEAD..@{u} 2>/dev/null || echo 0)
 
-      # Get actual lines changed from git diff (staged + unstaged)
-      # NOTE: This shows current uncommitted changes, not cumulative session edits.
-      # This is intentional - it reflects the actual state of the working tree.
-      lines_added=0
-      lines_removed=0
-      diff_numstat=$(git --no-optional-locks -C "$project_dir" diff --numstat HEAD 2>/dev/null)
-      if [[ -n "$diff_numstat" ]]; then
-        while IFS=$'\t' read -r add rem _; do
-          # Skip binary files (shown as -)
-          [[ "$add" == "-" ]] && continue
-          ((lines_added += add))
-          ((lines_removed += rem))
-        done <<< "$diff_numstat"
-      fi
-
       # Save to cache
-      echo "git_branch='$git_branch'; git_worktree='$git_worktree'; added=$added; modified=$modified; deleted=$deleted; ahead=$ahead; behind=$behind; lines_added=$lines_added; lines_removed=$lines_removed" > "$git_cache"
+      echo "git_branch='$git_branch'; git_worktree='$git_worktree'; added=$added; modified=$modified; deleted=$deleted; ahead=$ahead; behind=$behind" > "$git_cache"
     fi
   else
     # Use cached git data
@@ -492,10 +480,10 @@ fi
 duration_secs=$((duration_ms / 1000))
 duration_display=$(format_duration "$duration_secs")
 
-# --- Lines Changed ---
+# --- Session Lines Changed ---
 lines_display=""
-if [[ $lines_added -gt 0 || $lines_removed -gt 0 ]]; then
-  lines_display="${C_GIT_ADD}+${lines_added}${C_RESET}/${C_GIT_DEL}-${lines_removed}${C_RESET}"
+if [[ $session_lines_added -gt 0 || $session_lines_removed -gt 0 ]]; then
+  lines_display="${C_GIT_ADD}+${session_lines_added}${C_RESET}/${C_GIT_DEL}-${session_lines_removed}${C_RESET}"
 fi
 
 # --- Session Cost ---
@@ -519,6 +507,7 @@ fi
 sep=" ${C_MUTED}│${C_RESET} "
 
 row1="${C_ACCENT}${model_short}${C_RESET}"
+[[ -n "$agent_name" ]] && row1+=" ${C_MUTED}[${agent_name}]${C_RESET}"
 [[ -n "$dir_display" ]] && row1+="${sep}${C_WHITE}${dir_display}${C_RESET}"
 if [[ -n "$git_branch" ]]; then
   git_display="${C_ACCENT}${git_branch}${C_RESET}"

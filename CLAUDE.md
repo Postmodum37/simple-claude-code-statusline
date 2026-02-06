@@ -25,9 +25,11 @@ Claude Code pipes JSON to the script containing:
 - `cwd` / `workspace.project_dir` - Current/project directories
 - `context_window.*` - Token usage and context size
 - `session_id` - For session duration tracking
+- `cost.total_lines_added` / `cost.total_lines_removed` - Session-cumulative lines changed
+- `agent.name` - Agent name (when using `--agent` flag)
 
 The script outputs two lines of ANSI-escaped text:
-1. Model | Directory | Git branch + status | Lines changed
+1. Model [agent] | Directory | Git branch + status | Session lines changed
 2. Context bar | 5h rate limit | 7d rate limit | Cost | Duration
 
 ## Testing
@@ -61,7 +63,7 @@ The script uses:
 - Colors use Tokyo Night palette defined at top of script
 - Compatible with bash 3.2 (macOS default) - uses `=~` without capture groups to avoid `BASH_REMATCH`
 - Cross-platform: auto-detects macOS vs Linux for stat/date commands
-- Lines changed shows current uncommitted changes (`git diff HEAD`), not cumulative session edits
+- Lines changed shows session-cumulative totals from `cost.total_lines_added`/`cost.total_lines_removed`
 - Cache token count displayed when prompt caching is active
 - Auto-compact indicator `(↻)` shown when auto-compact is enabled
 
@@ -88,3 +90,35 @@ Bump version in both `marketplace.json` and `.claude-plugin/plugin.json` for:
 
 Do NOT bump version for:
 - `docs:` - documentation-only changes (README, CLAUDE.md, comments)
+
+## Claude Code Version Reviews
+
+Track which Claude Code versions have been reviewed for statusline-relevant changes.
+
+### Last reviewed: v2.1.33 (Feb 6, 2026)
+
+**v2.1.29–v2.1.31** — No statusline-impacting changes. v2.1.31 reduced terminal layout jitter during spinner transitions, which may improve statusline rendering stability.
+
+**v2.1.32** — Claude Opus 4.6 released (`claude-opus-4-6`). Model ID parsing handles this correctly (outputs "Opus 4.6"). Also introduced agent teams (experimental) and auto memory.
+
+**v2.1.33** — Added `TeammateIdle`/`TaskCompleted` hook events for agent teams. Plugin name now shown in skill descriptions.
+
+**v2.1.34** — Current version, no public changelog yet as of Feb 6, 2026.
+
+### No new statusline JSON fields in v2.1.29–v2.1.33
+
+The statusline input schema remained stable across these versions.
+
+### Available JSON fields not yet used
+
+These exist in the statusline JSON but we don't leverage them:
+
+- `version` — Claude Code version string (e.g., "2.1.33")
+- `vim.mode` — current vim mode
+- `output_style.name` — current output style
+- `cost.total_api_duration_ms` — API time vs wall time
+
+### Open issues to track
+
+- [#22221](https://github.com/anthropics/claude-code/issues/22221) — Expose rate limits in statusline JSON (would eliminate our OAuth API call)
+- [#17959](https://github.com/anthropics/claude-code/issues/17959) — `used_percentage` mismatch with Claude Code's internal "Context low" warning
