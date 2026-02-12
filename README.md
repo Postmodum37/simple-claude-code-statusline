@@ -20,6 +20,7 @@ A minimal, hackable two-line statusline for Claude Code.
 - Session lines changed (cumulative +added/-removed)
 - Session cost tracking ($X.XX)
 - Auto-compact indicator (↻) when enabled
+- `>200k` token threshold indicator (fast mode pricing doubles past 200k)
 - Cross-platform (macOS and Linux)
 - No build step - just bash
 
@@ -45,7 +46,7 @@ A minimal, hackable two-line statusline for Claude Code.
 
 ![Sonnet model with yellow context bar](screenshot-sonnet.png)
 
-Shows abbreviated model names: Opus 4.5, Sonnet 4, Haiku, etc.
+Shows abbreviated model names: Opus 4.6, Sonnet 4.5, Haiku, etc.
 
 ## Requirements
 
@@ -133,39 +134,29 @@ row2+="${sep}${seg_duration}"
 
 ## JSON Input Reference
 
-Claude Code pipes JSON to statusline scripts via stdin. The official docs don't cover all available fields - here's what's actually available (as of Claude Code 2.1.12):
-
-### Documented Fields
+Claude Code pipes JSON to statusline scripts via stdin. Here's what's available (as of Claude Code v2.1.39):
 
 ```json
 {
   "hook_event_name": "Status",
   "session_id": "abc123...",
   "cwd": "/current/working/directory",
+  "version": "2.1.39",
   "model": {
-    "id": "claude-opus-4-5-20251101",
-    "display_name": "Opus 4.5"
+    "id": "claude-opus-4-6",
+    "display_name": "Opus 4.6"
   },
   "workspace": {
     "current_dir": "/current/working/directory",
     "project_dir": "/original/project/directory"
   },
-  "version": "2.1.12",
   "cost": {
     "total_cost_usd": 0.05,
     "total_duration_ms": 120000,
     "total_lines_added": 156,
-    "total_lines_removed": 23
-  }
-}
-```
-
-### Undocumented Fields (added in v2.1.6)
-
-These fields are available but not in the official statusline documentation:
-
-```json
-{
+    "total_lines_removed": 23,
+    "total_api_duration_ms": 95000
+  },
   "context_window": {
     "context_window_size": 200000,
     "used_percentage": 45,
@@ -176,16 +167,26 @@ These fields are available but not in the official statusline documentation:
       "cache_creation_input_tokens": 10000,
       "cache_read_input_tokens": 10000
     }
+  },
+  "exceeds_200k_tokens": false,
+  "transcript_path": "/path/to/transcript.jsonl",
+  "agent": {
+    "name": "my-agent"
   }
 }
 ```
 
 | Field | Description |
 |-------|-------------|
-| `context_window.context_window_size` | Total context window size in tokens |
+| `model.id` / `model.display_name` | Current model identifier and display name |
+| `cwd` / `workspace.project_dir` | Current working directory and project root |
 | `context_window.used_percentage` | Percentage of context used (0-100) |
 | `context_window.remaining_percentage` | Percentage remaining (0-100) |
-| `context_window.current_usage.*` | Breakdown of token usage by type |
+| `context_window.current_usage.*` | Per-API-call token breakdown by type |
+| `exceeds_200k_tokens` | Whether token count exceeds 200k (fast mode pricing threshold) |
+| `cost.total_lines_added` / `cost.total_lines_removed` | Session-cumulative lines changed |
+| `cost.total_cost_usd` / `cost.total_duration_ms` | Session cost and duration |
+| `agent.name` | Agent name when using `--agent` flag |
 
 ### Rate Limits (via OAuth API)
 

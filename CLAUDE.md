@@ -65,8 +65,8 @@ The script uses:
 - Compatible with bash 3.2 (macOS default) - uses `=~` without capture groups to avoid `BASH_REMATCH`
 - Cross-platform: auto-detects macOS vs Linux for stat/date commands
 - Lines changed shows session-cumulative totals from `cost.total_lines_added`/`cost.total_lines_removed`
-- Cache token count displayed when prompt caching is active
 - Auto-compact indicator `(↻)` shown when auto-compact is enabled
+- `>200k` indicator shown when token count exceeds 200k (fast mode pricing threshold)
 
 ## Plugin Development
 
@@ -96,7 +96,7 @@ Do NOT bump version for:
 
 Track which Claude Code versions have been reviewed for statusline-relevant changes.
 
-### Last reviewed: v2.1.33 (Feb 6, 2026)
+### Last reviewed: v2.1.39 (Feb 12, 2026)
 
 **v2.1.29–v2.1.31** — No statusline-impacting changes. v2.1.31 reduced terminal layout jitter during spinner transitions, which may improve statusline rendering stability.
 
@@ -104,22 +104,25 @@ Track which Claude Code versions have been reviewed for statusline-relevant chan
 
 **v2.1.33** — Added `TeammateIdle`/`TaskCompleted` hook events for agent teams. Plugin name now shown in skill descriptions.
 
-**v2.1.34** — Current version, no public changelog yet as of Feb 6, 2026.
+**v2.1.34–v2.1.39** — Mostly bug fixes and stability improvements. v2.1.36 added fast mode for Opus 4.6. v2.1.39 improved terminal rendering performance. No new statusline JSON fields were added; the `speed` attribute (fast mode) was added to OTel tracing only, not exposed in statusline input.
 
-### No new statusline JSON fields in v2.1.29–v2.1.33
+### No new statusline JSON fields in v2.1.29–v2.1.39
 
-The statusline input schema remained stable across these versions.
+The statusline input schema remained stable across these versions. The official statusline docs now document several fields (`context_window.current_usage`, `context_window.remaining_percentage`, `exceeds_200k_tokens`, `transcript_path`) — we now use `exceeds_200k_tokens` for the >200k indicator.
 
 ### Available JSON fields not yet used
 
 These exist in the statusline JSON but we don't leverage them:
 
-- `version` — Claude Code version string (e.g., "2.1.33")
+- `version` — Claude Code version string (e.g., "2.1.39")
 - `vim.mode` — current vim mode
 - `output_style.name` — current output style
 - `cost.total_api_duration_ms` — API time vs wall time
+- `context_window.current_usage` — object with per-API-call token counts (`input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`)
+- `context_window.remaining_percentage` — pre-calculated remaining % (inverse of `used_percentage`)
+- `transcript_path` — path to conversation transcript file
 
 ### Open issues to track
 
-- [#22221](https://github.com/anthropics/claude-code/issues/22221) — Expose rate limits in statusline JSON (would eliminate our OAuth API call)
+- [#22221](https://github.com/anthropics/claude-code/issues/22221) — Expose rate limits in statusline JSON (would eliminate our OAuth API call; still open, no assignees)
 - [#17959](https://github.com/anthropics/claude-code/issues/17959) — `used_percentage` mismatch with Claude Code's internal "Context low" warning

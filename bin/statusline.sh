@@ -61,8 +61,7 @@ context_size=200000
 used_pct=""
 duration_ms=0
 total_cost=0
-total_input_tokens=0
-total_output_tokens=0
+exceeds_200k=false
 session_lines_added=0
 session_lines_removed=0
 agent_name=""
@@ -76,8 +75,7 @@ eval "$(echo "$input" | jq -r '
   @sh "used_pct=\(.context_window.used_percentage // "")",
   @sh "duration_ms=\(.cost.total_duration_ms // 0)",
   @sh "total_cost=\(.cost.total_cost_usd // 0)",
-  @sh "total_input_tokens=\(.context_window.total_input_tokens // 0)",
-  @sh "total_output_tokens=\(.context_window.total_output_tokens // 0)",
+  @sh "exceeds_200k=\(.exceeds_200k_tokens // false)",
   @sh "session_lines_added=\(.cost.total_lines_added // 0)",
   @sh "session_lines_removed=\(.cost.total_lines_removed // 0)",
   @sh "agent_name=\(.agent.name // "")"
@@ -336,7 +334,7 @@ fi
 
 # --- Context Calculation ---
 # IMPORTANT: used_percentage is the authoritative source maintained by Claude Code.
-# current_usage fields are cumulative session totals and NOT updated after /compact.
+# current_usage contains per-API-call token counts (not cumulative session totals).
 ctx_no_data=false
 ctx_pct=0
 
@@ -517,8 +515,12 @@ if [[ -n "$git_branch" ]]; then
 fi
 [[ -n "$lines_display" ]] && row1+="${sep}${lines_display}"
 
-# Build context display with optional auto-compact indicator
+# Build context display with optional indicators
 ctx_display="${ctx_color}${bar} ${ctx_tokens}/${ctx_max}${C_RESET}"
+# Show >200k indicator when token count exceeds 200k (fast mode pricing doubles)
+if [[ "$exceeds_200k" == "true" ]]; then
+  ctx_display+=" ${C_HIGH}>200k${C_RESET}"
+fi
 # Show auto-compact indicator when enabled (but don't guess the threshold)
 if [[ "$auto_compact_enabled" == "true" && "$ctx_no_data" == "false" ]]; then
   ctx_display+=" ${C_MUTED}(↻)${C_RESET}"
