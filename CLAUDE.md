@@ -96,7 +96,7 @@ Do NOT bump version for:
 
 Track which Claude Code versions have been reviewed for statusline-relevant changes.
 
-### Last reviewed: v2.1.39 (Feb 12, 2026)
+### Last reviewed: v2.1.45 (Feb 18, 2026)
 
 **v2.1.29–v2.1.31** — No statusline-impacting changes. v2.1.31 reduced terminal layout jitter during spinner transitions, which may improve statusline rendering stability.
 
@@ -106,9 +106,19 @@ Track which Claude Code versions have been reviewed for statusline-relevant chan
 
 **v2.1.34–v2.1.39** — Mostly bug fixes and stability improvements. v2.1.36 added fast mode for Opus 4.6. v2.1.39 improved terminal rendering performance. No new statusline JSON fields were added; the `speed` attribute (fast mode) was added to OTel tracing only, not exposed in statusline input.
 
-### No new statusline JSON fields in v2.1.29–v2.1.39
+**v2.1.40** — Version number skipped in changelog.
 
-The statusline input schema remained stable across these versions. The official statusline docs now document several fields (`context_window.current_usage`, `context_window.remaining_percentage`, `exceeds_200k_tokens`, `transcript_path`) — we now use `exceeds_200k_tokens` for the >200k indicator.
+**v2.1.41** — Narrow terminal layout improvements. `speed` attribute added to OTel (fast mode visibility) but not exposed in statusline JSON. New CLI auth subcommands.
+
+**v2.1.42** — Startup performance improvements (deferred Zod schema). Date moved out of system prompt. Opus 4.6 effort callout.
+
+**v2.1.43–v2.1.44** — Bug fixes only. No statusline-impacting changes.
+
+**v2.1.45** — Claude Sonnet 4.6 released (`claude-sonnet-4-6`). Model ID parsing handles this correctly (outputs "Sonnet 4.6"). SDK gained `SDKRateLimitInfo`/`SDKRateLimitEvent` types for rate limit status — SDK-only, not yet exposed in statusline JSON. Plugins no longer require restart after installation.
+
+### No new statusline JSON fields in v2.1.29–v2.1.45
+
+The statusline input schema remained stable across these versions. The official statusline docs now document several fields (`context_window.current_usage`, `context_window.remaining_percentage`, `exceeds_200k_tokens`, `transcript_path`) — we now use `exceeds_200k_tokens` for the >200k indicator. The SDK gained rate limit types in v2.1.45 (`SDKRateLimitInfo`), suggesting rate limit data may eventually be exposed to statusline (tracked in #22221).
 
 ### Available JSON fields not yet used
 
@@ -121,8 +131,10 @@ These exist in the statusline JSON but we don't leverage them:
 - `context_window.current_usage` — object with per-API-call token counts (`input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`)
 - `context_window.remaining_percentage` — pre-calculated remaining % (inverse of `used_percentage`)
 - `transcript_path` — path to conversation transcript file
+- `context_window.total_input_tokens` — cumulative input tokens across session
+- `context_window.total_output_tokens` — cumulative output tokens across session
 
 ### Open issues to track
 
-- [#22221](https://github.com/anthropics/claude-code/issues/22221) — Expose rate limits in statusline JSON (would eliminate our OAuth API call; still open, no assignees)
-- [#17959](https://github.com/anthropics/claude-code/issues/17959) — `used_percentage` mismatch with Claude Code's internal "Context low" warning
+- [#22221](https://github.com/anthropics/claude-code/issues/22221) — Expose rate limits in statusline JSON (would eliminate our OAuth API call; open, labeled `enhancement`/`med-priority`, no assignees. SDK now has rate limit types as of v2.1.45)
+- [#17959](https://github.com/anthropics/claude-code/issues/17959) — `used_percentage` mismatch with Claude Code's internal "Context low" warning (marked stale by bot)
