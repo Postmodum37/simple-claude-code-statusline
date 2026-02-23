@@ -341,30 +341,42 @@ if [[ -n "$project_dir" ]]; then
 fi
 
 # --- Context Calculation ---
-# IMPORTANT: used_percentage is the authoritative source maintained by Claude Code.
-# current_usage contains per-API-call token counts (not cumulative session totals).
+# Dual-source: prefer actual token data from current_usage, fall back to used_percentage.
+# Track both for divergence detection.
 ctx_no_data=false
 ctx_pct=0
+actual_tokens=0
+official_pct=""
 
+# Calculate actual tokens from current_usage (sum of all token types)
+actual_tokens=$((cu_input + cu_output + cu_cache_create + cu_cache_read))
+
+# Parse official used_percentage for fallback and divergence detection
 if [[ -n "$used_pct" && "$used_pct" != "null" ]]; then
-  # PRIMARY: Use Claude Code's authoritative used_percentage
-  ctx_pct=${used_pct%.*}
-  [[ ! "$ctx_pct" =~ ^[0-9]+$ ]] && ctx_pct=0
-else
-  # No percentage data available (fresh session before first API call)
-  ctx_no_data=true
+  official_pct=${used_pct%.*}
+  [[ ! "$official_pct" =~ ^[0-9]+$ ]] && official_pct=""
 fi
 
-# Calculate estimated token count from percentage for display
-if [[ "$ctx_no_data" == "false" && $context_size -gt 0 ]]; then
+if [[ $actual_tokens -gt 0 && $context_size -gt 0 ]]; then
+  # PRIMARY: Calculate from actual token data
+  ctx_pct=$((actual_tokens * 100 / context_size))
+  ctx_tokens=$(format_tokens "$actual_tokens")
+elif [[ -n "$official_pct" ]]; then
+  # FALLBACK: Use official used_percentage with estimated tokens
+  ctx_pct=$official_pct
   estimated_tokens=$((ctx_pct * context_size / 100))
+  ctx_tokens=$(format_tokens "$estimated_tokens")
 else
-  estimated_tokens=0
+  # No data available (fresh session before first API call)
+  ctx_no_data=true
+  ctx_tokens="—"
 fi
 
 # Clamp context percentage to 0-100 range
 [[ $ctx_pct -lt 0 ]] && ctx_pct=0
 [[ $ctx_pct -gt 100 ]] && ctx_pct=100
+
+ctx_max=$(format_tokens "$context_size")
 
 # --- Auto-compact awareness ---
 # Check if auto-compact is enabled (default) or disabled
@@ -390,13 +402,6 @@ filled=$((ctx_pct * bar_width / 100))
 empty=$((bar_width - filled))
 
 bar=$(build_bar "$filled" "$empty")
-
-if [[ "$ctx_no_data" == "true" ]]; then
-  ctx_tokens="—"
-else
-  ctx_tokens=$(format_tokens "$estimated_tokens")
-fi
-ctx_max=$(format_tokens "$context_size")
 
 # --- Usage Stats (cached 60s, errors cached 15s) ---
 usage_5h=""
