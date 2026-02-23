@@ -67,6 +67,7 @@ The script uses:
 - Lines changed shows session-cumulative totals from `cost.total_lines_added`/`cost.total_lines_removed`
 - Auto-compact indicator `(↻)` shown when auto-compact is enabled
 - `>200k` indicator shown when token count exceeds 200k (fast mode pricing threshold)
+- Context display uses dual-source approach: actual token data from `current_usage` (primary), `used_percentage` (fallback). Divergence indicator `(Δ)` shown when sources differ by >10pp
 
 ## Plugin Development
 
@@ -118,7 +119,7 @@ Track which Claude Code versions have been reviewed for statusline-relevant chan
 
 ### No new statusline JSON fields in v2.1.29–v2.1.45
 
-The statusline input schema remained stable across these versions. The official statusline docs now document several fields (`context_window.current_usage`, `context_window.remaining_percentage`, `exceeds_200k_tokens`, `transcript_path`) — we now use `exceeds_200k_tokens` for the >200k indicator. The SDK gained rate limit types in v2.1.45 (`SDKRateLimitInfo`), suggesting rate limit data may eventually be exposed to statusline (tracked in #22221).
+The statusline input schema remained stable across these versions. The official statusline docs now document several fields (`context_window.current_usage`, `context_window.remaining_percentage`, `exceeds_200k_tokens`, `transcript_path`) — we now use `exceeds_200k_tokens` for the >200k indicator and `context_window.current_usage` for actual token counts in the context display. The SDK gained rate limit types in v2.1.45 (`SDKRateLimitInfo`), suggesting rate limit data may eventually be exposed to statusline (tracked in #22221).
 
 ### Available JSON fields not yet used
 
@@ -128,7 +129,6 @@ These exist in the statusline JSON but we don't leverage them:
 - `vim.mode` — current vim mode
 - `output_style.name` — current output style
 - `cost.total_api_duration_ms` — API time vs wall time
-- `context_window.current_usage` — object with per-API-call token counts (`input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`)
 - `context_window.remaining_percentage` — pre-calculated remaining % (inverse of `used_percentage`)
 - `transcript_path` — path to conversation transcript file
 - `context_window.total_input_tokens` — cumulative input tokens across session
