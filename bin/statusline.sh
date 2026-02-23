@@ -538,6 +538,14 @@ fi
 if [[ "$auto_compact_enabled" == "true" && "$ctx_no_data" == "false" ]]; then
   ctx_display+=" ${C_MUTED}(↻)${C_RESET}"
 fi
+# Show divergence indicator when calculated and official percentages differ >10pp
+if [[ $actual_tokens -gt 0 && -n "$official_pct" ]]; then
+  diff=$((ctx_pct - official_pct))
+  [[ $diff -lt 0 ]] && diff=$((-diff))
+  if [[ $diff -gt 10 ]]; then
+    ctx_display+=" ${C_WARN}(Δ)${C_RESET}"
+  fi
+fi
 
 row2="${ctx_display}"
 [[ -n "$usage_5h" ]] && row2+="${sep}${usage_5h}"
