@@ -348,7 +348,8 @@ ctx_pct=0
 actual_tokens=0
 official_pct=""
 
-# Calculate actual tokens from current_usage (sum of all token types)
+# Calculate actual tokens from current_usage (non-overlapping partitions per API format:
+# input_tokens = uncached input, cache_* = cached portions, output_tokens = response)
 actual_tokens=$((cu_input + cu_output + cu_cache_create + cu_cache_read))
 
 # Parse official used_percentage for fallback and divergence detection
@@ -540,9 +541,9 @@ if [[ "$auto_compact_enabled" == "true" && "$ctx_no_data" == "false" ]]; then
 fi
 # Show divergence indicator when calculated and official percentages differ >10pp
 if [[ $actual_tokens -gt 0 && -n "$official_pct" ]]; then
-  diff=$((ctx_pct - official_pct))
-  [[ $diff -lt 0 ]] && diff=$((-diff))
-  if [[ $diff -gt 10 ]]; then
+  pct_diff=$((ctx_pct - official_pct))
+  [[ $pct_diff -lt 0 ]] && pct_diff=$((-pct_diff))
+  if [[ $pct_diff -gt 10 ]]; then
     ctx_display+=" ${C_WARN}(Δ)${C_RESET}"
   fi
 fi
