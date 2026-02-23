@@ -65,6 +65,10 @@ exceeds_200k=false
 session_lines_added=0
 session_lines_removed=0
 agent_name=""
+cu_input=0
+cu_output=0
+cu_cache_create=0
+cu_cache_read=0
 
 eval "$(echo "$input" | jq -r '
   @sh "model_id=\(.model.id // "")",
@@ -78,7 +82,11 @@ eval "$(echo "$input" | jq -r '
   @sh "exceeds_200k=\(.exceeds_200k_tokens // false)",
   @sh "session_lines_added=\(.cost.total_lines_added // 0)",
   @sh "session_lines_removed=\(.cost.total_lines_removed // 0)",
-  @sh "agent_name=\(.agent.name // "")"
+  @sh "agent_name=\(.agent.name // "")",
+  @sh "cu_input=\(.context_window.current_usage.input_tokens // 0)",
+  @sh "cu_output=\(.context_window.current_usage.output_tokens // 0)",
+  @sh "cu_cache_create=\(.context_window.current_usage.cache_creation_input_tokens // 0)",
+  @sh "cu_cache_read=\(.context_window.current_usage.cache_read_input_tokens // 0)"
 ' 2>/dev/null)"
 
 # --- Project-specific cache files (use hash of project_dir for isolation) ---
