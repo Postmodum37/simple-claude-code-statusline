@@ -199,6 +199,7 @@ if [[ "$old_format_part" =~ ^[0-9]+-[0-9]+- ]]; then
 else
   # New format: claude-{model}-{major}[-{minor}]-{date}
   version_part="${model_id#*-*-}"  # Remove "claude-model-": "4-5-20251101" or "4-20250514"
+  version_part="${version_part%%\[*}"  # Strip context suffix like [1m]
   if [[ "$version_part" =~ ^[0-9]+ ]]; then
     major="${version_part%%-*}"
     minor_rest="${version_part#*-}"
@@ -428,6 +429,8 @@ if [[ $usage_cache_age -gt 60 ]] || { [[ "$usage_is_error" == "true" ]] && [[ $u
   # Get OAuth token: macOS uses keychain, Linux uses credentials file
   if [[ "$IS_MACOS" == "true" ]]; then
     token=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null | jq -r '.claudeAiOauth.accessToken' 2>/dev/null)
+    # Fallback to credentials file if keychain JSON is truncated
+    [[ -z "$token" || "$token" == "null" ]] && token=$(jq -r '.claudeAiOauth.accessToken' ~/.claude/.credentials.json 2>/dev/null)
   else
     token=$(jq -r '.claudeAiOauth.accessToken' ~/.claude/.credentials.json 2>/dev/null)
   fi

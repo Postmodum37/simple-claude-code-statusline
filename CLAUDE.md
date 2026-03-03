@@ -51,7 +51,7 @@ The script uses:
 - `jq` - JSON parsing (required)
 - `curl` - Rate limit API calls
 - `git` - Repository status
-- macOS `security` command - OAuth token retrieval from keychain
+- macOS `security` command - OAuth token retrieval from keychain (falls back to `~/.claude/.credentials.json` if keychain JSON is truncated)
 - Platform-specific: `stat -f %m` (macOS) or `stat -c %Y` (Linux) for cache age
 - Platform-specific: `date -j -f` (macOS) or `date -d` (Linux) for ISO date parsing
 - `~/.claude.json` - Auto-compact setting detection
@@ -97,7 +97,7 @@ Do NOT bump version for:
 
 Track which Claude Code versions have been reviewed for statusline-relevant changes.
 
-### Last reviewed: v2.1.45 (Feb 18, 2026)
+### Last reviewed: v2.1.63 (Mar 3, 2026)
 
 **v2.1.29–v2.1.31** — No statusline-impacting changes. v2.1.31 reduced terminal layout jitter during spinner transitions, which may improve statusline rendering stability.
 
@@ -117,15 +117,37 @@ Track which Claude Code versions have been reviewed for statusline-relevant chan
 
 **v2.1.45** — Claude Sonnet 4.6 released (`claude-sonnet-4-6`). Model ID parsing handles this correctly (outputs "Sonnet 4.6"). SDK gained `SDKRateLimitInfo`/`SDKRateLimitEvent` types for rate limit status — SDK-only, not yet exposed in statusline JSON. Plugins no longer require restart after installation.
 
-### No new statusline JSON fields in v2.1.29–v2.1.45
+**v2.1.46** — claude.ai MCP connectors support. No statusline changes.
 
-The statusline input schema remained stable across these versions. The official statusline docs now document several fields (`context_window.current_usage`, `context_window.remaining_percentage`, `exceeds_200k_tokens`, `transcript_path`) — we now use `exceeds_200k_tokens` for the >200k indicator and `context_window.current_usage` for actual token counts in the context display. The SDK gained rate limit types in v2.1.45 (`SDKRateLimitInfo`), suggesting rate limit data may eventually be exposed to statusline (tracked in #22221).
+**v2.1.47** — Added `workspace.added_dirs` to statusline JSON (directories from `/add-dir`). Not yet used by us.
+
+**v2.1.49** — `--worktree` flag; Sonnet 4.5 1M removed (Sonnet 4.6 1M replaces it); `ConfigChange` hook; SDK model info fields (`supportsEffort`, etc.). No new statusline fields.
+
+**v2.1.50** — Opus 4.6 fast mode gets 1M context window. Model IDs now include `[1m]` suffix for 1M context (e.g., `claude-opus-4-6[1m]`). `CLAUDE_CODE_DISABLE_1M_CONTEXT` env var. Also: `isolation: worktree` for agents, `CLAUDE_CODE_SIMPLE`, `claude agents` CLI.
+
+**v2.1.51** — `/model` shows human-readable labels. Security fix: statusline hooks now require workspace trust. `CLAUDE_CODE_ACCOUNT_UUID`/`USER_EMAIL`/`ORGANIZATION_UUID` env vars; managed settings via plist/Registry.
+
+**v2.1.53–v2.1.58** — Bug fixes, Windows stability, memory leak fixes. No statusline changes.
+
+**v2.1.59** — Auto-memory with `/memory`; `/copy` command; MCP OAuth refresh race fix. No statusline changes.
+
+**v2.1.62** — Prompt suggestion cache fix. No statusline changes.
+
+**v2.1.63** — HTTP hooks; `/simplify` and `/batch` commands; memory leak fixes; `ENABLE_CLAUDEAI_MCP_SERVERS=false`. No statusline changes.
+
+### Statusline JSON field changes in v2.1.29–v2.1.63
+
+v2.1.47 added `workspace.added_dirs`. v2.1.50 introduced the `[1m]` suffix on model IDs for 1M context models (fixed in v1.10.1 — we now strip `[...]` before version parsing). All other statusline fields remained stable. The SDK gained rate limit types in v2.1.45 (`SDKRateLimitInfo`) but rate limit data is still not exposed in statusline JSON.
+
+### Usage API changes (not in Claude Code changelog)
+
+The `/api/oauth/usage` response now includes per-model rate limit fields (`seven_day_opus`, `seven_day_sonnet`, `seven_day_oauth_apps`, `seven_day_cowork`) and an unknown `iguana_necktie` field. These are additive — existing `five_hour` and `seven_day` fields are unchanged. `extra_usage.utilization` can now be `null` (our `// 0` handles this).
 
 ### Available JSON fields not yet used
 
 These exist in the statusline JSON but we don't leverage them:
 
-- `version` — Claude Code version string (e.g., "2.1.39")
+- `version` — Claude Code version string (e.g., "2.1.63")
 - `vim.mode` — current vim mode
 - `output_style.name` — current output style
 - `cost.total_api_duration_ms` — API time vs wall time
@@ -133,8 +155,9 @@ These exist in the statusline JSON but we don't leverage them:
 - `transcript_path` — path to conversation transcript file
 - `context_window.total_input_tokens` — cumulative input tokens across session
 - `context_window.total_output_tokens` — cumulative output tokens across session
+- `workspace.added_dirs` — directories added via `/add-dir` (since v2.1.47)
 
 ### Open issues to track
 
-- [#22221](https://github.com/anthropics/claude-code/issues/22221) — Expose rate limits in statusline JSON (would eliminate our OAuth API call; open, labeled `enhancement`/`med-priority`, no assignees. SDK now has rate limit types as of v2.1.45)
+- [#22221](https://github.com/anthropics/claude-code/issues/22221) — Expose rate limits in statusline JSON (would eliminate our OAuth API call; open, labeled `enhancement`/`med-priority`, no assignees. SDK has rate limit types since v2.1.45 but still not in statusline input)
 - [#17959](https://github.com/anthropics/claude-code/issues/17959) — `used_percentage` mismatch with Claude Code's internal "Context low" warning (marked stale by bot)
