@@ -405,7 +405,7 @@ empty=$((bar_width - filled))
 
 bar=$(build_bar "$filled" "$empty")
 
-# --- Usage Stats (cached 60s, errors cached 15s) ---
+# --- Usage Stats (cached 300s, errors cached 15s) ---
 usage_5h=""
 usage_7d=""
 usage_extra=""
@@ -424,8 +424,8 @@ if [[ -f "$usage_cache" ]]; then
   [[ "$usage_cache_content" == *'"five_hour"'* ]] && usage_is_error=false
 fi
 
-# Refresh if: cache expired (60s) OR error cache expired (15s)
-if [[ $usage_cache_age -gt 60 ]] || { [[ "$usage_is_error" == "true" ]] && [[ $usage_cache_age -gt 15 ]]; }; then
+# Refresh if: cache expired (300s) OR error cache expired (15s)
+if [[ $usage_cache_age -gt 300 ]] || { [[ "$usage_is_error" == "true" ]] && [[ $usage_cache_age -gt 15 ]]; }; then
   # Get OAuth token: macOS uses keychain, Linux uses credentials file
   if [[ "$IS_MACOS" == "true" ]]; then
     token=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null | jq -r '.claudeAiOauth.accessToken' 2>/dev/null)
@@ -453,7 +453,11 @@ if [[ $usage_cache_age -gt 60 ]] || { [[ "$usage_is_error" == "true" ]] && [[ $u
   fi
 fi
 
-if [[ "$usage_is_error" == "false" ]]; then
+if [[ "$usage_is_error" == "true" ]]; then
+  # Show "no data" indicator when usage API is unavailable
+  usage_5h="${C_MUTED}5h:—${C_RESET}"
+  usage_7d="${C_MUTED}7d:—${C_RESET}"
+elif [[ "$usage_is_error" == "false" ]]; then
   # Single jq call for all usage data
   eval "$(jq -r '
     @sh "five_util=\(.five_hour.utilization // 0)",
