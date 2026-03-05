@@ -436,8 +436,18 @@ if [[ $usage_cache_age -gt 60 ]] || { [[ "$usage_is_error" == "true" ]] && [[ $u
   fi
   if [[ -n "$token" && "$token" != "null" ]]; then
     usage_json=$(curl -s -m 2 -H "Authorization: Bearer $token" -H "anthropic-beta: oauth-2025-04-20" "https://api.anthropic.com/api/oauth/usage" 2>/dev/null)
-    # Only cache if we got a response (even errors, for rate limiting)
-    [[ -n "$usage_json" ]] && echo "$usage_json" > "$usage_cache"
+    if [[ -n "$usage_json" ]]; then
+      if [[ "$usage_json" == *'"five_hour"'* ]]; then
+        # Valid response — update cache
+        echo "$usage_json" > "$usage_cache"
+      elif [[ "$usage_is_error" == "true" ]]; then
+        # No valid cache exists — store error (will retry in 15s)
+        echo "$usage_json" > "$usage_cache"
+      else
+        # Valid cache exists but got error — keep valid data, touch to delay retry
+        touch "$usage_cache"
+      fi
+    fi
   fi
 fi
 
