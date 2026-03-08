@@ -418,39 +418,62 @@ fi
 # Read cache content once, check if it's an error (shorter TTL for errors)
 usage_cache_content=""
 usage_is_error=true
+usage_fetch_ts=0
 if [[ -f "$usage_cache" ]]; then
-  usage_cache_content=$(<"$usage_cache")
+  first_line=$(head -1 "$usage_cache")
+  if [[ "$first_line" =~ ^[0-9]+$ ]]; then
+    # New format: TIMESTAMP\nJSON
+    usage_fetch_ts=$first_line
+    usage_cache_content=$(tail -n +2 "$usage_cache")
+  else
+    # Old format: raw JSON (backward compat)
+    usage_cache_content=$(<"$usage_cache")
+    usage_fetch_ts=$(stat_mtime "$usage_cache")
+  fi
   # Valid response has "five_hour" key
   [[ "$usage_cache_content" == *'"five_hour"'* ]] && usage_is_error=false
 fi
 
 # Refresh if: cache expired (300s) OR error cache expired (15s)
 if [[ $usage_cache_age -gt 300 ]] || { [[ "$usage_is_error" == "true" ]] && [[ $usage_cache_age -gt 15 ]]; }; then
-  # Get OAuth token: macOS uses keychain, Linux uses credentials file
-  if [[ "$IS_MACOS" == "true" ]]; then
-    token=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null | jq -r '.claudeAiOauth.accessToken' 2>/dev/null)
-    # Fallback to credentials file if keychain JSON is truncated
-    [[ -z "$token" || "$token" == "null" ]] && token=$(jq -r '.claudeAiOauth.accessToken' ~/.claude/.credentials.json 2>/dev/null)
-  else
-    token=$(jq -r '.claudeAiOauth.accessToken' ~/.claude/.credentials.json 2>/dev/null)
+  # Lock to prevent thundering herd (mkdir is atomic on POSIX)
+  lock_dir="${cache_dir}/claude-usage-lock"
+  # Stale lock cleanup (holder crashed; curl timeout is 2s, 10s is generous)
+  if [[ -d "$lock_dir" ]]; then
+    lock_age=$(( NOW - $(stat_mtime "$lock_dir") ))
+    [[ $lock_age -gt 10 ]] && rmdir "$lock_dir" 2>/dev/null
   fi
-  if [[ -n "$token" && "$token" != "null" ]]; then
-    usage_json=$(curl -s -m 2 -H "Authorization: Bearer $token" -H "anthropic-beta: oauth-2025-04-20" "https://api.anthropic.com/api/oauth/usage" 2>/dev/null)
-    if [[ -n "$usage_json" ]]; then
-      if [[ "$usage_json" == *'"five_hour"'* ]]; then
-        # Valid response — update cache and variables
-        echo "$usage_json" > "$usage_cache"
-        usage_is_error=false
-        usage_cache_content="$usage_json"
-      elif [[ "$usage_is_error" == "true" ]]; then
-        # No valid cache exists — store error (will retry in 15s)
-        echo "$usage_json" > "$usage_cache"
-      else
-        # Valid cache exists but got error — keep valid data, touch to delay retry
-        touch "$usage_cache"
+
+  if mkdir "$lock_dir" 2>/dev/null; then
+    # Get OAuth token: macOS uses keychain, Linux uses credentials file
+    if [[ "$IS_MACOS" == "true" ]]; then
+      token=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null | jq -r '.claudeAiOauth.accessToken' 2>/dev/null)
+      # Fallback to credentials file if keychain JSON is truncated
+      [[ -z "$token" || "$token" == "null" ]] && token=$(jq -r '.claudeAiOauth.accessToken' ~/.claude/.credentials.json 2>/dev/null)
+    else
+      token=$(jq -r '.claudeAiOauth.accessToken' ~/.claude/.credentials.json 2>/dev/null)
+    fi
+    if [[ -n "$token" && "$token" != "null" ]]; then
+      usage_json=$(curl -s -m 2 -H "Authorization: Bearer $token" -H "anthropic-beta: oauth-2025-04-20" "https://api.anthropic.com/api/oauth/usage" 2>/dev/null)
+      if [[ -n "$usage_json" ]]; then
+        if [[ "$usage_json" == *'"five_hour"'* ]]; then
+          # Valid response — update cache with embedded timestamp
+          printf '%s\n%s\n' "$NOW" "$usage_json" > "$usage_cache"
+          usage_is_error=false
+          usage_cache_content="$usage_json"
+          usage_fetch_ts=$NOW
+        elif [[ "$usage_is_error" == "true" ]]; then
+          # No valid cache exists — store error with zero timestamp (will retry in 15s)
+          printf '%s\n%s\n' "0" "$usage_json" > "$usage_cache"
+        else
+          # Valid cache exists but got error — keep valid data, touch to delay retry
+          touch "$usage_cache"
+        fi
       fi
     fi
+    rmdir "$lock_dir" 2>/dev/null
   fi
+  # else: another process is refreshing, use existing cache
 fi
 
 if [[ "$usage_is_error" == "true" ]]; then
@@ -459,7 +482,7 @@ if [[ "$usage_is_error" == "true" ]]; then
   usage_7d="${C_MUTED}7d:—${C_RESET}"
 elif [[ "$usage_is_error" == "false" ]]; then
   # Single jq call for all usage data
-  eval "$(jq -r '
+  eval "$(echo "$usage_cache_content" | jq -r '
     @sh "five_util=\(.five_hour.utilization // 0)",
     @sh "five_reset=\(.five_hour.resets_at // "")",
     @sh "seven_util=\(.seven_day.utilization // 0)",
@@ -468,7 +491,7 @@ elif [[ "$usage_is_error" == "false" ]]; then
     @sh "extra_util=\(.extra_usage.utilization // 0)",
     @sh "extra_used=\(.extra_usage.used_credits // 0)",
     @sh "extra_limit=\(.extra_usage.monthly_limit // 0)"
-  ' "$usage_cache" 2>/dev/null)" || {
+  ' 2>/dev/null)" || {
     five_util=0
     seven_util=0
     five_reset=""
@@ -504,6 +527,22 @@ elif [[ "$usage_is_error" == "false" ]]; then
     extra_used_int=${extra_used%.*}
     extra_color=$(get_semantic_color "$extra_util_int")
     usage_extra="${extra_color}Extra:${extra_util_int}% ${C_MUTED}(\$${extra_used_int}/\$${extra_limit})${C_RESET}"
+  fi
+
+  # Staleness indicator for usage data
+  usage_stale=""
+  if [[ $usage_fetch_ts -gt 0 ]]; then
+    data_age=$((NOW - usage_fetch_ts))
+    if [[ -n "$five_reset" ]]; then
+      five_reset_ts=$(parse_iso_date "$five_reset")
+      if [[ $five_reset_ts -lt $NOW ]]; then
+        usage_stale=" ${C_WARN}(old)${C_RESET}"
+      elif [[ $data_age -gt 600 ]]; then
+        usage_stale=" ${C_MUTED}(~$((data_age / 60))m)${C_RESET}"
+      fi
+    elif [[ $data_age -gt 600 ]]; then
+      usage_stale=" ${C_MUTED}(~$((data_age / 60))m)${C_RESET}"
+    fi
   fi
 fi
 
@@ -571,6 +610,7 @@ row2="${ctx_display}"
 [[ -n "$usage_5h" ]] && row2+="${sep}${usage_5h}"
 [[ -n "$usage_7d" ]] && row2+="${sep}${usage_7d}"
 [[ -n "$usage_extra" ]] && row2+="${sep}${usage_extra}"
+[[ -n "$usage_stale" ]] && row2+="${usage_stale}"
 [[ -n "$cost_display" ]] && row2+="${sep}${cost_display}"
 row2+="${sep}${C_MUTED}${duration_display}${C_RESET}"
 
