@@ -49,6 +49,7 @@ input=$(cat)
 cache_dir="${CLAUDE_CODE_TMPDIR:-/tmp}"
 # Usage cache is global (user-level rate limit data, not project-specific)
 usage_cache="${cache_dir}/claude-usage-cache"
+usage_attempt="${cache_dir}/claude-usage-attempt"
 # Note: git_cache is defined after JSON extraction (project-specific)
 
 # --- Extract all fields with single jq call ---
@@ -342,32 +343,35 @@ if [[ -n "$project_dir" ]]; then
 fi
 
 # --- Context Calculation ---
-# Dual-source: prefer actual token data from current_usage, fall back to used_percentage.
-# Track both for divergence detection.
+# used_percentage is canonical for bar/color/percentage.
+# current_usage.* is for absolute token count display only.
 ctx_no_data=false
 ctx_pct=0
 actual_tokens=0
+
+# Parse used_percentage (primary source for percentage/bar/color)
 official_pct=""
-
-# Calculate actual tokens from current_usage (non-overlapping partitions per API format:
-# input_tokens = uncached input, cache_* = cached portions, output_tokens = response)
-actual_tokens=$((cu_input + cu_output + cu_cache_create + cu_cache_read))
-
-# Parse official used_percentage for fallback and divergence detection
 if [[ -n "$used_pct" && "$used_pct" != "null" ]]; then
   official_pct=${used_pct%.*}
   [[ ! "$official_pct" =~ ^[0-9]+$ ]] && official_pct=""
 fi
 
-if [[ $actual_tokens -gt 0 && $context_size -gt 0 ]]; then
-  # PRIMARY: Calculate from actual token data
+# Calculate actual tokens from current_usage (for Xk/Yk display only)
+actual_tokens=$((cu_input + cu_output + cu_cache_create + cu_cache_read))
+
+if [[ -n "$official_pct" ]]; then
+  # PRIMARY: used_percentage drives bar/color/percentage
+  ctx_pct=$official_pct
+  if [[ $actual_tokens -gt 0 ]]; then
+    ctx_tokens=$(format_tokens "$actual_tokens")
+  else
+    estimated_tokens=$((ctx_pct * context_size / 100))
+    ctx_tokens=$(format_tokens "$estimated_tokens")
+  fi
+elif [[ $actual_tokens -gt 0 && $context_size -gt 0 ]]; then
+  # FALLBACK: Calculate percentage from actual tokens
   ctx_pct=$((actual_tokens * 100 / context_size))
   ctx_tokens=$(format_tokens "$actual_tokens")
-elif [[ -n "$official_pct" ]]; then
-  # FALLBACK: Use official used_percentage with estimated tokens
-  ctx_pct=$official_pct
-  estimated_tokens=$((ctx_pct * context_size / 100))
-  ctx_tokens=$(format_tokens "$estimated_tokens")
 else
   # No data available (fresh session before first API call)
   ctx_no_data=true
@@ -405,82 +409,67 @@ empty=$((bar_width - filled))
 
 bar=$(build_bar "$filled" "$empty")
 
-# --- Usage Stats (cached 300s, errors cached 15s) ---
+# --- Usage Stats (async background fetch, 120s refresh) ---
 usage_5h=""
 usage_7d=""
 usage_extra=""
 
-usage_cache_age=999
-if [[ -f "$usage_cache" ]]; then
-  usage_cache_age=$(( NOW - $(stat_mtime "$usage_cache") ))
-fi
+# Background fetch function — runs detached, writes only on success
+bg_fetch_usage() {
+  local cache_file="$1" attempt_file="$2"
+  touch "$attempt_file"
 
-# Read cache content once, check if it's an error (shorter TTL for errors)
+  # Get OAuth token: macOS uses keychain, Linux uses credentials file
+  local token
+  if [[ "$IS_MACOS" == "true" ]]; then
+    token=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null | jq -r '.claudeAiOauth.accessToken' 2>/dev/null)
+    [[ -z "$token" || "$token" == "null" ]] && token=$(jq -r '.claudeAiOauth.accessToken' ~/.claude/.credentials.json 2>/dev/null)
+  else
+    token=$(jq -r '.claudeAiOauth.accessToken' ~/.claude/.credentials.json 2>/dev/null)
+  fi
+  [[ -z "$token" || "$token" == "null" ]] && return
+
+  local usage_json
+  usage_json=$(curl -s -m 5 -H "Authorization: Bearer $token" \
+    -H "anthropic-beta: oauth-2025-04-20" \
+    "https://api.anthropic.com/api/oauth/usage" 2>/dev/null)
+
+  # Only write on valid response (atomic: mktemp + mv)
+  if [[ "$usage_json" == *'"five_hour"'* ]]; then
+    local tmp
+    tmp=$(mktemp)
+    printf '%s\n%s\n' "$(date +%s)" "$usage_json" > "$tmp"
+    mv "$tmp" "$cache_file"
+  fi
+}
+
+# Read cache (always fast — no blocking I/O)
 usage_cache_content=""
-usage_is_error=true
 usage_fetch_ts=0
+usage_has_data=false
 if [[ -f "$usage_cache" ]]; then
   first_line=$(head -1 "$usage_cache")
   if [[ "$first_line" =~ ^[0-9]+$ ]]; then
-    # New format: TIMESTAMP\nJSON
     usage_fetch_ts=$first_line
     usage_cache_content=$(tail -n +2 "$usage_cache")
-  else
-    # Old format: raw JSON (backward compat)
-    usage_cache_content=$(<"$usage_cache")
-    usage_fetch_ts=$(stat_mtime "$usage_cache")
+    [[ "$usage_cache_content" == *'"five_hour"'* ]] && usage_has_data=true
   fi
-  # Valid response has "five_hour" key
-  [[ "$usage_cache_content" == *'"five_hour"'* ]] && usage_is_error=false
 fi
 
-# Refresh if: cache expired (300s) OR error cache expired (15s)
-if [[ $usage_cache_age -gt 300 ]] || { [[ "$usage_is_error" == "true" ]] && [[ $usage_cache_age -gt 15 ]]; }; then
-  # Lock to prevent thundering herd (mkdir is atomic on POSIX)
-  lock_dir="${cache_dir}/claude-usage-lock"
-  # Stale lock cleanup (holder crashed; curl timeout is 2s, 10s is generous)
-  if [[ -d "$lock_dir" ]]; then
-    lock_age=$(( NOW - $(stat_mtime "$lock_dir") ))
-    [[ $lock_age -gt 10 ]] && rmdir "$lock_dir" 2>/dev/null
-  fi
+# Trigger background refresh if cache is stale and not recently attempted
+usage_cache_age=$((NOW - $(stat_mtime "$usage_cache" 2>/dev/null || echo 0)))
+attempt_age=$((NOW - $(stat_mtime "$usage_attempt" 2>/dev/null || echo 0)))
 
-  if mkdir "$lock_dir" 2>/dev/null; then
-    # Get OAuth token: macOS uses keychain, Linux uses credentials file
-    if [[ "$IS_MACOS" == "true" ]]; then
-      token=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null | jq -r '.claudeAiOauth.accessToken' 2>/dev/null)
-      # Fallback to credentials file if keychain JSON is truncated
-      [[ -z "$token" || "$token" == "null" ]] && token=$(jq -r '.claudeAiOauth.accessToken' ~/.claude/.credentials.json 2>/dev/null)
-    else
-      token=$(jq -r '.claudeAiOauth.accessToken' ~/.claude/.credentials.json 2>/dev/null)
-    fi
-    if [[ -n "$token" && "$token" != "null" ]]; then
-      usage_json=$(curl -s -m 2 -H "Authorization: Bearer $token" -H "anthropic-beta: oauth-2025-04-20" "https://api.anthropic.com/api/oauth/usage" 2>/dev/null)
-      if [[ -n "$usage_json" ]]; then
-        if [[ "$usage_json" == *'"five_hour"'* ]]; then
-          # Valid response — update cache with embedded timestamp
-          printf '%s\n%s\n' "$NOW" "$usage_json" > "$usage_cache"
-          usage_is_error=false
-          usage_cache_content="$usage_json"
-          usage_fetch_ts=$NOW
-        elif [[ "$usage_is_error" == "true" ]]; then
-          # No valid cache exists — store error with zero timestamp (will retry in 15s)
-          printf '%s\n%s\n' "0" "$usage_json" > "$usage_cache"
-        else
-          # Valid cache exists but got error — keep valid data, touch to delay retry
-          touch "$usage_cache"
-        fi
-      fi
-    fi
-    rmdir "$lock_dir" 2>/dev/null
-  fi
-  # else: another process is refreshing, use existing cache
+if [[ $usage_cache_age -gt 120 && $attempt_age -gt 30 ]]; then
+  bg_fetch_usage "$usage_cache" "$usage_attempt" &
+  disown
 fi
 
-if [[ "$usage_is_error" == "true" ]]; then
-  # Show "no data" indicator when usage API is unavailable
+if [[ "$usage_has_data" == "false" ]]; then
+  # No valid cache — show dashes
   usage_5h="${C_MUTED}5h:—${C_RESET}"
   usage_7d="${C_MUTED}7d:—${C_RESET}"
-elif [[ "$usage_is_error" == "false" ]]; then
+else
   # Single jq call for all usage data
   eval "$(echo "$usage_cache_content" | jq -r '
     @sh "five_util=\(.five_hour.utilization // 0)",
@@ -529,7 +518,7 @@ elif [[ "$usage_is_error" == "false" ]]; then
     usage_extra="${extra_color}Extra:${extra_util_int}% ${C_MUTED}(\$${extra_used_int}/\$${extra_limit})${C_RESET}"
   fi
 
-  # Staleness indicator for usage data
+  # Staleness indicator for usage data (show age when >60s old)
   usage_stale=""
   if [[ $usage_fetch_ts -gt 0 ]]; then
     data_age=$((NOW - usage_fetch_ts))
@@ -537,10 +526,10 @@ elif [[ "$usage_is_error" == "false" ]]; then
       five_reset_ts=$(parse_iso_date "$five_reset")
       if [[ $five_reset_ts -lt $NOW ]]; then
         usage_stale=" ${C_WARN}(old)${C_RESET}"
-      elif [[ $data_age -gt 600 ]]; then
+      elif [[ $data_age -gt 60 ]]; then
         usage_stale=" ${C_MUTED}(~$((data_age / 60))m)${C_RESET}"
       fi
-    elif [[ $data_age -gt 600 ]]; then
+    elif [[ $data_age -gt 60 ]]; then
       usage_stale=" ${C_MUTED}(~$((data_age / 60))m)${C_RESET}"
     fi
   fi
@@ -597,15 +586,6 @@ fi
 if [[ "$auto_compact_enabled" == "true" && "$ctx_no_data" == "false" ]]; then
   ctx_display+=" ${C_MUTED}(↻)${C_RESET}"
 fi
-# Show divergence indicator when calculated and official percentages differ >10pp
-if [[ $actual_tokens -gt 0 && -n "$official_pct" ]]; then
-  pct_diff=$((ctx_pct - official_pct))
-  [[ $pct_diff -lt 0 ]] && pct_diff=$((-pct_diff))
-  if [[ $pct_diff -gt 10 ]]; then
-    ctx_display+=" ${C_WARN}(Δ)${C_RESET}"
-  fi
-fi
-
 row2="${ctx_display}"
 [[ -n "$usage_5h" ]] && row2+="${sep}${usage_5h}"
 [[ -n "$usage_7d" ]] && row2+="${sep}${usage_7d}"

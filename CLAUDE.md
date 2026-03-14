@@ -60,14 +60,15 @@ The script uses:
 
 - Adding a new JSON field requires updates in 3 places: defaults (before `eval`), jq `@sh` block (last line has no trailing comma), and CLAUDE.md "Available JSON fields" section
 - Uses `--no-optional-locks` with git commands to avoid conflicts
-- Caches to `${CLAUDE_CODE_TMPDIR:-/tmp}/claude-*` (rate limit: 300s TTL, 15s for errors; git: 5s TTL)
+- Caches to `${CLAUDE_CODE_TMPDIR:-/tmp}/claude-*` (git: 5s TTL; usage: 120s refresh, 30s debounce)
+- Usage API fetch is async (background process with `& disown`), never blocks render. Cache is binary: valid `TIMESTAMP\nJSON` file or absent. Atomic writes via `mktemp` + `mv`.
 - Colors use Tokyo Night palette defined at top of script
 - Compatible with bash 3.2 (macOS default) - uses `=~` without capture groups to avoid `BASH_REMATCH`
 - Cross-platform: auto-detects macOS vs Linux for stat/date commands
 - Lines changed shows session-cumulative totals from `cost.total_lines_added`/`cost.total_lines_removed`
 - Auto-compact indicator `(↻)` shown when auto-compact is enabled
 - `>200k` indicator shown when token count exceeds 200k (fast mode pricing threshold)
-- Context display uses dual-source approach: actual token data from `current_usage` (primary), `used_percentage` (fallback). Divergence indicator `(Δ)` shown when sources differ by >10pp
+- Context display uses `used_percentage` as single source of truth for bar/color/percentage. `current_usage.*` drives absolute token count display only.
 
 ## Plugin Development
 
