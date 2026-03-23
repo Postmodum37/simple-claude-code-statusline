@@ -1,15 +1,34 @@
 package main
 
 import (
-	"fmt"
 	"os"
+	"path/filepath"
 )
 
 func main() {
-	_, err := ParseStdin(os.Stdin)
+	stdin, err := ParseStdin(os.Stdin)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+		os.Exit(0) // silent failure
 	}
-	fmt.Println("ok")
+
+	cacheDir := os.Getenv("CLAUDE_CODE_TMPDIR")
+	if cacheDir == "" {
+		cacheDir = os.TempDir()
+	}
+
+	// Gather data
+	claudeJSONPath := filepath.Join(os.Getenv("HOME"), ".claude.json")
+	usageData, fetchWg := GetUsageData(cacheDir, stdin)
+	gitData := GetGitStatus(stdin.Workspace.ProjectDir, cacheDir)
+	compactEnabled, compactPct := GetCompactThreshold(stdin.ContextWindow.ContextWindowSize, claudeJSONPath)
+
+	// Phase 1: Render to stdout
+	Render(os.Stdout, stdin, gitData, usageData, CompactInfo{
+		Enabled:      compactEnabled,
+		ThresholdPct: compactPct,
+	})
+
+	// Phase 2: Close stdout (Claude Code gets output), wait for background fetch
+	os.Stdout.Close()
+	fetchWg.Wait()
 }
