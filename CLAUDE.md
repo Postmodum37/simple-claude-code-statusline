@@ -43,6 +43,8 @@ make test     # Run Go test suite
 make clean    # Remove compiled binaries
 ```
 
+**When to rebuild binaries**: You MUST run `make build` and commit the resulting binaries whenever you modify any file in `src/`. The binaries under `bin/{os}-{arch}/` are checked into git and are what users actually run — source changes have no effect until binaries are rebuilt. Always include the rebuilt binaries in the same commit as the source changes.
+
 ## Testing
 
 Run the Go test suite:
