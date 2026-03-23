@@ -18,7 +18,7 @@ func stripANSI(s string) string {
 
 func TestBuildProgressBarEmpty(t *testing.T) {
 	got := stripANSI(buildProgressBar(0, false, 0))
-	want := strings.Repeat("▱", 20)
+	want := strings.Repeat("░", 20)
 	if got != want {
 		t.Errorf("pct=0, compact=false:\n got %q\nwant %q", got, want)
 	}
@@ -26,7 +26,7 @@ func TestBuildProgressBarEmpty(t *testing.T) {
 
 func TestBuildProgressBarHalf(t *testing.T) {
 	got := stripANSI(buildProgressBar(50, false, 0))
-	want := strings.Repeat("▰", 10) + strings.Repeat("▱", 10)
+	want := strings.Repeat("▓", 10) + strings.Repeat("░", 10)
 	if got != want {
 		t.Errorf("pct=50, compact=false:\n got %q\nwant %q", got, want)
 	}
@@ -34,7 +34,7 @@ func TestBuildProgressBarHalf(t *testing.T) {
 
 func TestBuildProgressBarFull(t *testing.T) {
 	got := stripANSI(buildProgressBar(100, false, 0))
-	want := strings.Repeat("▰", 20)
+	want := strings.Repeat("▓", 20)
 	if got != want {
 		t.Errorf("pct=100, compact=false:\n got %q\nwant %q", got, want)
 	}
@@ -46,7 +46,7 @@ func TestBuildProgressBarCompactMarkerVisible(t *testing.T) {
 	// markerPos = 83*20/100 = 16
 	// 9 filled + 7 empty (positions 9-15) + marker at 16 + 3 empty (17-19)
 	got := stripANSI(buildProgressBar(45, true, 83))
-	want := strings.Repeat("▰", 9) + strings.Repeat("▱", 7) + "│" + strings.Repeat("▱", 3)
+	want := strings.Repeat("▓", 9) + strings.Repeat("░", 7) + "│" + strings.Repeat("░", 3)
 	if got != want {
 		t.Errorf("pct=45, compact=true, threshold=83:\n got %q (len=%d)\nwant %q (len=%d)", got, len([]rune(got)), want, len([]rune(want)))
 	}
@@ -59,7 +59,7 @@ func TestBuildProgressBarCompactMarkerFilledPast(t *testing.T) {
 	// marker at 16 < filled 17, so marker is hidden (filled over it)
 	// 17 filled + 3 empty
 	got := stripANSI(buildProgressBar(85, true, 83))
-	want := strings.Repeat("▰", 17) + strings.Repeat("▱", 3)
+	want := strings.Repeat("▓", 17) + strings.Repeat("░", 3)
 	if got != want {
 		t.Errorf("pct=85, compact=true, threshold=83:\n got %q\nwant %q", got, want)
 	}
@@ -71,7 +71,7 @@ func TestBuildProgressBarCompactMarkerAtEnd(t *testing.T) {
 	// markerPos = 96*20/100 = 19 (clamped to 19)
 	// 9 filled + 10 empty (positions 9-18) + marker at 19
 	got := stripANSI(buildProgressBar(45, true, 96))
-	want := strings.Repeat("▰", 9) + strings.Repeat("▱", 10) + "│"
+	want := strings.Repeat("▓", 9) + strings.Repeat("░", 10) + "│"
 	if got != want {
 		t.Errorf("pct=45, compact=true, threshold=96:\n got %q (len=%d)\nwant %q (len=%d)", got, len([]rune(got)), want, len([]rune(want)))
 	}
@@ -323,8 +323,8 @@ func TestRenderExtraUsage(t *testing.T) {
 		ExtraUsage: &ExtraUsage{
 			IsEnabled:    true,
 			Utilization:  25.0,
-			UsedCredits:  50.0,
-			MonthlyLimit: 200.0,
+			UsedCredits:  5000.0,
+			MonthlyLimit: 20000.0,
 		},
 	}
 	compact := CompactInfo{}

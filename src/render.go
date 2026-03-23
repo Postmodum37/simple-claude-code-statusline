@@ -76,7 +76,7 @@ func buildProgressBar(pct int, compactEnabled bool, compactThresholdPct int) str
 	for i := 0; i < barWidth; i++ {
 		if i < filled {
 			b.WriteString(color)
-			b.WriteString("▰")
+			b.WriteString("▓")
 			b.WriteString(cReset)
 		} else if compactEnabled && i == markerPos && i >= filled {
 			b.WriteString(cMuted)
@@ -84,7 +84,7 @@ func buildProgressBar(pct int, compactEnabled bool, compactThresholdPct int) str
 			b.WriteString(cReset)
 		} else {
 			b.WriteString(cMuted)
-			b.WriteString("▱")
+			b.WriteString("░")
 			b.WriteString(cReset)
 		}
 	}
@@ -334,8 +334,8 @@ func buildUsageSection(usage *UsageData) string {
 		color := getSemanticColor(pct)
 		extraStr := fmt.Sprintf("%sExtra:%d%%%s ($%d/$%d)",
 			color, pct, cReset,
-			int(usage.ExtraUsage.UsedCredits),
-			int(usage.ExtraUsage.MonthlyLimit))
+			int(usage.ExtraUsage.UsedCredits/100),
+			int(usage.ExtraUsage.MonthlyLimit/100))
 		parts = append(parts, extraStr)
 	}
 
