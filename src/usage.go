@@ -167,25 +167,46 @@ func usageCachePath(cacheDir string) string {
 	return filepath.Join(cacheDir, "claude-statusline-usage.json")
 }
 
+// usageBackoffPath returns the path for the 429 backoff marker file.
+func usageBackoffPath(cacheDir string) string {
+	return filepath.Join(cacheDir, "claude-statusline-usage-backoff")
+}
+
 const (
-	usageCacheTTL      = 120 // seconds
+	usageCacheTTL      = 600 // 10 minutes — usage data changes slowly
+	usageBackoffTTL    = 300 // 5 minutes — don't retry after 429
 	usageFetchTimeout  = 5 * time.Second
 	usageWaitTimeout   = 200 * time.Millisecond
 	usageAPIURL        = "https://api.anthropic.com/api/oauth/usage"
 	usageAPIBetaHeader = "oauth-2025-04-20"
 )
 
-// GetUsageData returns usage/rate limit data using a two-phase approach:
-// 1. If stdin has rate limits, use those directly (no-op WaitGroup).
-// 2. If cache is fresh, use it (no-op WaitGroup).
-// 3. Otherwise, start background fetch, wait up to 200ms, return whatever is available.
-//
-// Returns the data (possibly stale or nil) and a WaitGroup that completes
-// when any background fetch finishes.
+// isBackedOff returns true if we recently got a 429 and should not retry.
+func isBackedOff(cacheDir string) bool {
+	path := usageBackoffPath(cacheDir)
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	age := time.Since(info.ModTime()).Seconds()
+	return age < usageBackoffTTL
+}
+
+// markBackoff writes a backoff marker file after a 429 response.
+func markBackoff(cacheDir string) {
+	path := usageBackoffPath(cacheDir)
+	os.WriteFile(path, []byte("429"), 0644)
+}
+
+// GetUsageData returns usage/rate limit data using a multi-phase approach:
+// 1. If stdin has rate limits, use those directly (no API call needed).
+// 2. If cache is fresh, use it.
+// 3. If backed off from 429, return stale cache.
+// 4. Otherwise, start background fetch, wait up to 200ms, return whatever is available.
 func GetUsageData(cacheDir string, stdin *StdinData) (*UsageData, *sync.WaitGroup) {
 	var wg sync.WaitGroup
 
-	// Phase 1: stdin rate limits
+	// Phase 1: stdin rate limits (v2.1.80+, plan-dependent)
 	if stdin.RateLimits != nil {
 		data := convertStdinRateLimits(stdin.RateLimits)
 		return data, &wg
@@ -199,12 +220,18 @@ func GetUsageData(cacheDir string, stdin *StdinData) (*UsageData, *sync.WaitGrou
 		return cached, &wg
 	}
 
-	// Phase 3: background fetch
+	// Phase 3: check 429 backoff
+	if isBackedOff(cacheDir) {
+		return cached, &wg
+	}
+
+	// Phase 4: background fetch
+	version := stdin.Version
 	ch := make(chan *UsageData, 1)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		result := fetchUsageFromAPI(cachePath)
+		result := fetchUsageFromAPI(cachePath, cacheDir, version)
 		ch <- result
 	}()
 
@@ -214,17 +241,15 @@ func GetUsageData(cacheDir string, stdin *StdinData) (*UsageData, *sync.WaitGrou
 		if fresh != nil {
 			return fresh, &wg
 		}
-		// Background fetch failed, return stale cache
 		return cached, &wg
 	case <-time.After(usageWaitTimeout):
-		// Timed out waiting, return stale cache (may be nil)
 		return cached, &wg
 	}
 }
 
 // fetchUsageFromAPI fetches usage data from the API and writes it to cache.
-// Returns the fetched data or nil on failure.
-func fetchUsageFromAPI(cachePath string) *UsageData {
+// On 429, writes a backoff marker. Returns the fetched data or nil on failure.
+func fetchUsageFromAPI(cachePath, cacheDir, version string) *UsageData {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return nil
@@ -246,11 +271,24 @@ func fetchUsageFromAPI(cachePath string) *UsageData {
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("anthropic-beta", usageAPIBetaHeader)
 
+	// Use claude-code User-Agent to get the generous rate limit bucket.
+	// Without this, the API applies a much stricter rate limit (~5 requests then permanent 429).
+	// See: https://github.com/anthropics/claude-code/issues/30930
+	if version == "" {
+		version = "2.1.81"
+	}
+	req.Header.Set("User-Agent", "claude-code/"+version)
+
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusTooManyRequests {
+		markBackoff(cacheDir)
+		return nil
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		return nil
@@ -267,7 +305,9 @@ func fetchUsageFromAPI(cachePath string) *UsageData {
 	}
 	data.FetchedAt = time.Now().Unix()
 
-	// Write cache (best effort)
+	// Clear any backoff marker on success
+	os.Remove(usageBackoffPath(cacheDir))
+
 	writeUsageCache(cachePath, &data)
 
 	return &data

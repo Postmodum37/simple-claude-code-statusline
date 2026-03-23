@@ -275,7 +275,7 @@ func TestGetUsageDataFromStaleCache(t *testing.T) {
 	cachePath := filepath.Join(cacheDir, "claude-statusline-usage.json")
 
 	stale := &UsageData{
-		FetchedAt: time.Now().Add(-200 * time.Second).Unix(),
+		FetchedAt: time.Now().Add(-700 * time.Second).Unix(),
 		FiveHour: &UsageWindow{
 			Utilization: 33.0,
 			ResetsAt:    "2026-03-23T18:00:00Z",
@@ -334,6 +334,49 @@ func TestGetUsageDataNoCacheNoStdin(t *testing.T) {
 
 	// data may be nil (no cache, background fetch failed)
 	_ = data
+}
+
+// --- Backoff tests ---
+
+func TestBackoffMarker(t *testing.T) {
+	dir := t.TempDir()
+
+	if isBackedOff(dir) {
+		t.Fatal("should not be backed off initially")
+	}
+
+	markBackoff(dir)
+
+	if !isBackedOff(dir) {
+		t.Fatal("should be backed off after markBackoff")
+	}
+}
+
+func TestGetUsageDataRespectsBackoff(t *testing.T) {
+	cacheDir := t.TempDir()
+	cachePath := filepath.Join(cacheDir, "claude-statusline-usage.json")
+
+	// Write stale cache
+	stale := &UsageData{
+		FetchedAt: time.Now().Add(-700 * time.Second).Unix(),
+		FiveHour:  &UsageWindow{Utilization: 20.0, ResetsAt: "2026-03-23T18:00:00Z"},
+	}
+	writeUsageCache(cachePath, stale)
+
+	// Mark backoff
+	markBackoff(cacheDir)
+
+	stdin := &StdinData{}
+	data, wg := GetUsageData(cacheDir, stdin)
+	wg.Wait()
+
+	// Should return stale cache without attempting fetch
+	if data == nil {
+		t.Fatal("should return stale cache during backoff")
+	}
+	if data.FiveHour == nil || data.FiveHour.Utilization != 20.0 {
+		t.Errorf("expected stale data, got %+v", data.FiveHour)
+	}
 }
 
 // --- Stdin rate limit conversion test ---
