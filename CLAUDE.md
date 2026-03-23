@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Claude Code plugin that provides a custom two-line statusline. It's a pure bash script with no build system - the script runs directly when Claude Code renders its status bar.
+This is a Claude Code plugin that provides a custom two-line statusline. It's implemented as cross-compiled Go binaries dispatched via a thin bash shim (`bin/statusline.sh`).
 
 ## Architecture
 
@@ -12,15 +12,18 @@ This repo serves as both a **marketplace** and a **plugin**:
 
 - `.claude-plugin/marketplace.json` - Makes this repo a Claude Code marketplace
 - `.claude-plugin/plugin.json` - Plugin manifest
-- `bin/statusline.sh` - The main script. Reads JSON from stdin, outputs ANSI-formatted text to stdout.
+- `src/` - Go source files (stdin parsing, rendering, git, usage API, formatting)
+- `bin/statusline.sh` - Bash shim that detects OS/arch and execs the correct binary
+- `bin/{os}-{arch}/statusline` - Cross-compiled Go binaries (darwin/linux, amd64/arm64)
+- `Makefile` - Build targets: `build` (cross-compile all), `test`, `clean`
 - `commands/setup.md` - Command that configures `~/.claude/settings.json`
 - `hooks/` - SessionStart hook that reminds users to run setup if not configured
 
-When installed, the plugin runs from `${CLAUDE_PLUGIN_ROOT}/bin/statusline.sh` (the plugin cache directory).
+When installed, the plugin runs from `${CLAUDE_PLUGIN_ROOT}/bin/statusline.sh` (the plugin cache directory), which dispatches to the platform-appropriate binary.
 
 ## How the Statusline Works
 
-Claude Code pipes JSON to the script containing:
+Claude Code pipes JSON to the binary via stdin containing:
 - `model.id` / `model.display_name` - Current model
 - `cwd` / `workspace.project_dir` - Current/project directories
 - `context_window.*` - Token usage and context size
@@ -28,15 +31,28 @@ Claude Code pipes JSON to the script containing:
 - `cost.total_lines_added` / `cost.total_lines_removed` - Session-cumulative lines changed
 - `agent.name` - Agent name (when using `--agent` flag)
 
-The script outputs two lines of ANSI-escaped text:
+The binary outputs two lines of ANSI-escaped text:
 1. Model [agent] | Directory | Git branch + status | Session lines changed
 2. Context bar | 5h rate limit | 7d rate limit | Cost | Duration
 
+## Building
+
+```sh
+make build    # Cross-compile all platform binaries
+make test     # Run Go test suite
+make clean    # Remove compiled binaries
+```
+
 ## Testing
+
+Run the Go test suite:
+```sh
+make test
+```
 
 Test manually by piping sample JSON:
 ```sh
-echo '{"model":{"id":"claude-opus-4-5-20251101"},"cwd":"/tmp","context_window":{"used_percentage":42,"context_window_size":200000}}' | ./bin/statusline.sh
+echo '{"model":{"id":"claude-opus-4-6"},"cwd":"/tmp","context_window":{"used_percentage":42,"context_window_size":200000}}' | ./bin/statusline.sh
 ```
 
 Note: Include `workspace.project_dir` in JSON for git info to display.
@@ -47,24 +63,19 @@ Do NOT use termshot/vhs for screenshots - they render fonts incorrectly. Ask use
 
 ## External Dependencies
 
-The script uses:
-- `jq` - JSON parsing (required)
-- `curl` - Rate limit API calls
-- `git` - Repository status
-- macOS `security` command - OAuth token retrieval from keychain (falls back to `~/.claude/.credentials.json` if keychain JSON is truncated)
-- Platform-specific: `stat -f %m` (macOS) or `stat -c %Y` (Linux) for cache age
-- Platform-specific: `date -j -f` (macOS) or `date -d` (Linux) for ISO date parsing
+The Go binary handles JSON parsing and HTTP natively. External commands used:
+- `git` - Repository status (with `--no-optional-locks` to avoid conflicts)
+- macOS `security` command - OAuth token retrieval from keychain (falls back to `~/.claude/.credentials.json`)
 - `~/.claude.json` - Auto-compact setting detection
 
 ## Key Implementation Notes
 
-- Adding a new JSON field requires updates in 3 places: defaults (before `eval`), jq `@sh` block (last line has no trailing comma), and CLAUDE.md "Available JSON fields" section
-- Uses `--no-optional-locks` with git commands to avoid conflicts
-- Caches to `${CLAUDE_CODE_TMPDIR:-/tmp}/claude-*` (git: 5s TTL; usage: 120s refresh, 30s debounce)
-- Usage API fetch is async (background process with `& disown`), never blocks render. Cache is binary: valid `TIMESTAMP\nJSON` file or absent. Atomic writes via `mktemp` + `mv`.
-- Colors use Tokyo Night palette defined at top of script
-- Compatible with bash 3.2 (macOS default) - uses `=~` without capture groups to avoid `BASH_REMATCH`
-- Cross-platform: auto-detects macOS vs Linux for stat/date commands
+- Adding a new JSON field requires updating the `StdinData` struct in `src/stdin.go` and this file's "Available JSON fields" section
+- Go source is in `src/` with one package (`main`): stdin parsing, model ID parsing, formatting, git status, usage API, auto-compact detection, and ANSI rendering
+- Two-phase exit: renders output to stdout first, then closes stdout and waits for background usage API fetch to complete
+- Usage API fetch runs in a goroutine with 200ms wait timeout — never blocks render
+- Caches to `${CLAUDE_CODE_TMPDIR:-/tmp}/claude-*` (git: 5s TTL; usage: 10min TTL with 5min 429 backoff). Atomic writes via tmpfile + rename.
+- Colors use Tokyo Night palette as constants in `src/render.go`
 - Lines changed shows session-cumulative totals from `cost.total_lines_added`/`cost.total_lines_removed`
 - Auto-compact indicator `(↻)` shown when auto-compact is enabled
 - `>200k` indicator shown when token count exceeds 200k (fast mode pricing threshold)
@@ -138,11 +149,11 @@ Track which Claude Code versions have been reviewed for statusline-relevant chan
 
 ### Statusline JSON field changes in v2.1.29–v2.1.63
 
-v2.1.47 added `workspace.added_dirs`. v2.1.50 introduced the `[1m]` suffix on model IDs for 1M context models (fixed in v1.10.1 — we now strip `[...]` before version parsing). All other statusline fields remained stable. The SDK gained rate limit types in v2.1.45 (`SDKRateLimitInfo`) but rate limit data is still not exposed in statusline JSON.
+v2.1.47 added `workspace.added_dirs`. v2.1.50 introduced the `[1m]` suffix on model IDs for 1M context models (handled in `src/model.go` — we strip `[...]` before version parsing). All other statusline fields remained stable. The SDK gained rate limit types in v2.1.45 (`SDKRateLimitInfo`) but rate limit data is still not exposed in statusline JSON.
 
 ### Usage API changes (not in Claude Code changelog)
 
-The `/api/oauth/usage` response now includes per-model rate limit fields (`seven_day_opus`, `seven_day_sonnet`, `seven_day_oauth_apps`, `seven_day_cowork`) and an unknown `iguana_necktie` field. These are additive — existing `five_hour` and `seven_day` fields are unchanged. `extra_usage.utilization` can now be `null` (our `// 0` handles this).
+The `/api/oauth/usage` response now includes per-model rate limit fields (`seven_day_opus`, `seven_day_sonnet`, `seven_day_oauth_apps`, `seven_day_cowork`) and an unknown `iguana_necktie` field. These are additive — existing `five_hour` and `seven_day` fields are unchanged. `extra_usage.utilization` can now be `null` (Go's zero-value handles this).
 
 ### Available JSON fields not yet used
 

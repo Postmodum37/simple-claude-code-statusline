@@ -22,7 +22,7 @@ A minimal, hackable two-line statusline for Claude Code.
 - Auto-compact indicator (↻) when enabled
 - `>200k` token threshold indicator (fast mode pricing doubles past 200k)
 - Cross-platform (macOS and Linux)
-- No build step - just bash
+- Cross-compiled Go binaries — zero runtime dependencies
 
 ### Context Usage Colors
 
@@ -50,16 +50,9 @@ Shows abbreviated model names: Opus 4.6, Sonnet 4.5, Haiku, etc.
 
 ## Requirements
 
-- `jq` - JSON parsing
-- `curl` - Rate limit API calls
 - `git` - Repository status (optional)
 
-On macOS, the script also uses the `security` command to retrieve OAuth tokens from keychain.
-
-Install dependencies on macOS:
-```sh
-brew install jq
-```
+The plugin ships as pre-compiled Go binaries with no runtime dependencies. On macOS, it uses the `security` command to retrieve OAuth tokens from keychain.
 
 ## Installation
 
@@ -84,10 +77,19 @@ The statusline appears immediately after setup (no second restart needed).
 
 ### Option 2: Manual
 
-Copy the script:
+Clone the repo and build:
 ```sh
-curl -o ~/.claude/statusline.sh https://raw.githubusercontent.com/Postmodum37/simple-claude-code-statusline/main/bin/statusline.sh
+git clone https://github.com/Postmodum37/simple-claude-code-statusline.git
+cd simple-claude-code-statusline
+make build
+```
+
+Copy the shim and your platform's binary:
+```sh
+cp bin/statusline.sh ~/.claude/statusline.sh
 chmod +x ~/.claude/statusline.sh
+mkdir -p ~/.claude/bin
+cp bin/$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')/statusline ~/.claude/bin/statusline
 ```
 
 Add to `~/.claude/settings.json`:
@@ -95,7 +97,7 @@ Add to `~/.claude/settings.json`:
 {
   "statusLine": {
     "type": "command",
-    "command": "~/.claude/statusline.sh"
+    "command": "~/.claude/bin/statusline"
   }
 }
 ```
@@ -104,44 +106,18 @@ Restart Claude Code.
 
 ## Customization
 
-Edit `~/.claude/statusline.sh` directly. The script is self-contained and well-commented.
-
-### Colors
-
-Tokyo Night palette defined at the top:
-```bash
-C_ACCENT="\033[38;5;111m"     # Blue - model/branch
-C_MUTED="\033[38;5;146m"      # Gray - separators
-C_OK="\033[38;5;114m"         # Green - 0-50%
-C_WARN="\033[38;5;214m"       # Yellow - 51-75%
-C_HIGH="\033[38;5;208m"       # Orange - 76-90%
-C_CRIT="\033[38;5;196m"       # Red - 91%+
-```
-
-### Layout
-
-Modify the two-row output at the bottom of the script:
-```bash
-row1="$seg_model"
-[[ -n "$dir_display" ]] && row1+="${sep}${seg_dir}"
-[[ -n "$git_branch" ]] && row1+="${sep}${seg_git}"
-
-row2="$seg_context"
-[[ -n "$usage_5h" ]] && row2+="${sep}${seg_usage_5h}"
-[[ -n "$usage_7d" ]] && row2+="${sep}${seg_usage_7d}"
-row2+="${sep}${seg_duration}"
-```
+Fork the repo and edit the Go source. Colors are defined as constants in `src/render.go`, and the two-row layout is built in `buildRow1`/`buildRow2`. Run `make build` to compile after changes.
 
 ## JSON Input Reference
 
-Claude Code pipes JSON to statusline scripts via stdin. Here's what's available (as of Claude Code v2.1.39):
+Claude Code pipes JSON to statusline commands via stdin. Here's what's available (as of Claude Code v2.1.63):
 
 ```json
 {
   "hook_event_name": "Status",
   "session_id": "abc123...",
   "cwd": "/current/working/directory",
-  "version": "2.1.39",
+  "version": "2.1.63",
   "model": {
     "id": "claude-opus-4-6",
     "display_name": "Opus 4.6"
@@ -199,9 +175,14 @@ The API returns 5-hour and 7-day utilization percentages with reset times.
 
 ## Testing
 
-Test the script manually:
+Run the Go test suite:
 ```sh
-echo '{"model":{"id":"claude-opus-4-5-20251101"},"cwd":"/tmp","context_window":{"used_percentage":42,"context_window_size":200000},"cost":{"total_duration_ms":3600000,"total_lines_added":50,"total_lines_removed":10}}' | ~/.claude/statusline.sh
+make test
+```
+
+Test the binary manually by piping sample JSON:
+```sh
+echo '{"model":{"id":"claude-opus-4-6"},"cwd":"/tmp","context_window":{"used_percentage":42,"context_window_size":200000},"cost":{"total_duration_ms":3600000,"total_lines_added":50,"total_lines_removed":10}}' | ./bin/statusline.sh
 ```
 
 ## Uninstalling
