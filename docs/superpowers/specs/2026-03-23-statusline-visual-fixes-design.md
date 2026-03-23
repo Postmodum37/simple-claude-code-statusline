@@ -9,7 +9,7 @@ Two focused fixes to improve readability of the second statusline row.
 **Fix:** Replace with `▓` (medium shade) for filled and `░` (light shade) for empty. Higher contrast, better readability, universally supported.
 
 **Before:** `▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱`
-**After:** `▓▓▓▓▓▓▓▓▓░░░░░░░░░░░`
+**After:** `▓▓▓▓▓▓▓▓▓░░░░░░░░░░`
 
 **Scope:** `render.go` — `buildProgressBar` function, lines 79 and 87. Swap two character literals. Auto-compact marker (`│`) unchanged.
 
@@ -27,7 +27,7 @@ Two focused fixes to improve readability of the second statusline row.
 ## Files Changed
 
 - `src/render.go` — two changes (progress bar chars, extra usage division)
-- `src/render_test.go` — update expected strings in affected test cases
+- `src/render_test.go` — update test input data to use cent-denominated values (e.g., `UsedCredits: 5000.0`, `MonthlyLimit: 20000.0`) and update expected output strings
 
 ## Testing
 
