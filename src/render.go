@@ -79,8 +79,8 @@ func buildProgressBar(pct int, compactEnabled bool, compactThresholdPct int) str
 			b.WriteString("▓")
 			b.WriteString(cReset)
 		} else if compactEnabled && i == markerPos && i >= filled {
-			b.WriteString(cMuted)
-			b.WriteString("│")
+			b.WriteString(cWarn)
+			b.WriteString("▒")
 			b.WriteString(cReset)
 		} else {
 			b.WriteString(cMuted)
