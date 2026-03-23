@@ -61,7 +61,26 @@ Note: Include `workspace.project_dir` in JSON for git info to display.
 
 ## Screenshots
 
-Do NOT use termshot/vhs for screenshots - they render fonts incorrectly. Ask user to take manual screenshots from their terminal after running test commands with different mock JSON states.
+Three screenshots in the repo root are referenced by README.md:
+
+- `screenshot.png` — Main hero image: Opus model, moderate context (~42%), lines changed
+- `screenshot-git.png` — Git features: higher context (~65%), git status visible
+- `screenshot-sonnet.png` — Sonnet model, lower context (~30%), no lines changed
+
+**How to update:**
+
+1. Pipe mock JSON to the binary to generate ANSI output for each scenario:
+   ```sh
+   echo '{"model":{"id":"claude-opus-4-6[1m]"},"cwd":"/path/to/repo","workspace":{"project_dir":"/path/to/repo"},"context_window":{"used_percentage":42,"context_window_size":200000,"current_usage":{"input_tokens":76000,"output_tokens":8000}},"cost":{"total_cost_usd":1.25,"total_duration_ms":420000,"total_lines_added":51,"total_lines_removed":14}}' | ./bin/statusline.sh
+   ```
+2. Write a Python script (Pillow) that captures ANSI output to files, then renders each to PNG:
+   - Parse ANSI escape codes (`\x1b[38;5;Nm`) to extract xterm-256 colors
+   - Use a monospace font (SFMono or Menlo) on a Tokyo Night dark background (`#1a1b26`)
+   - Render block characters (░▒▓) with tighter spacing (~92% of char width) to avoid gaps in the progress bar
+   - Regular text uses standard monospace char-width advancement
+3. Update README alt text if the screenshot content changes (e.g., bar color)
+
+Do NOT use termshot/vhs — they render fonts incorrectly. The `workspace.project_dir` field must point to a real git repo for git info to appear.
 
 ## External Dependencies
 

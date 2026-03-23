@@ -44,7 +44,7 @@ A minimal, hackable two-line statusline for Claude Code.
 
 ### Model Display
 
-![Sonnet model with yellow context bar](screenshot-sonnet.png)
+![Sonnet model with green context bar](screenshot-sonnet.png)
 
 Shows abbreviated model names: Opus 4.6, Sonnet 4.5, Haiku, etc.
 
