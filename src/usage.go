@@ -1,25 +1,13 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"runtime"
-	"sync"
 	"time"
 )
 
-// UsageData holds rate limit and usage data from the API or cache.
+// UsageData holds rate limit data for display.
 type UsageData struct {
-	FetchedAt  int64        `json:"fetched_at"`
-	FiveHour   *UsageWindow `json:"five_hour,omitempty"`
-	SevenDay   *UsageWindow `json:"seven_day,omitempty"`
-	ExtraUsage *ExtraUsage  `json:"extra_usage,omitempty"`
+	FiveHour *UsageWindow `json:"five_hour,omitempty"`
+	SevenDay *UsageWindow `json:"seven_day,omitempty"`
 }
 
 // UsageWindow represents a single rate limit window (5h or 7d).
@@ -28,287 +16,36 @@ type UsageWindow struct {
 	ResetsAt    string  `json:"resets_at"`
 }
 
-// ExtraUsage holds extra/paid usage information.
-type ExtraUsage struct {
-	IsEnabled    bool    `json:"is_enabled"`
-	Utilization  float64 `json:"utilization"`
-	UsedCredits  float64 `json:"used_credits"`
-	MonthlyLimit float64 `json:"monthly_limit"`
-}
-
-// IsStale returns true if the cache is older than ttlSeconds.
-func (u *UsageData) IsStale(ttlSeconds int64) bool {
-	return time.Now().Unix()-u.FetchedAt > ttlSeconds
-}
-
-// readUsageCache reads a cached UsageData from disk.
-// Returns nil for nonexistent or corrupted files.
-func readUsageCache(path string) *UsageData {
-	data, err := os.ReadFile(path)
-	if err != nil {
+// GetUsageData converts stdin rate limits to UsageData.
+// Returns nil if no rate limits are available.
+func GetUsageData(stdin *StdinData) *UsageData {
+	if stdin.RateLimits == nil {
 		return nil
 	}
-	var cache UsageData
-	if err := json.Unmarshal(data, &cache); err != nil {
-		return nil
-	}
-	return &cache
-}
 
-// writeUsageCache writes UsageData to disk atomically using tmpfile + rename.
-func writeUsageCache(path string, data *UsageData) error {
-	raw, err := json.Marshal(data)
-	if err != nil {
-		return err
-	}
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, "usage-cache-*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	if _, err := tmp.Write(raw); err != nil {
-		tmp.Close()
-		os.Remove(tmpName)
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmpName)
-		return err
-	}
-	return os.Rename(tmpName, path)
-}
+	data := &UsageData{}
 
-// credentialsJSON is the structure of ~/.claude/.credentials.json
-type credentialsJSON struct {
-	ClaudeAiOauth struct {
-		AccessToken string `json:"accessToken"`
-	} `json:"claudeAiOauth"`
-}
-
-// getOAuthToken retrieves the OAuth access token.
-// On macOS, it first tries the system keychain, then falls back to the credentials file.
-// On other platforms, it reads the credentials file directly.
-func getOAuthToken(credentialsPath string) (string, error) {
-	if runtime.GOOS == "darwin" {
-		token, err := getOAuthTokenFromKeychain()
-		if err == nil && token != "" {
-			return token, nil
+	if stdin.RateLimits.FiveHour != nil {
+		uw := &UsageWindow{}
+		if stdin.RateLimits.FiveHour.UsedPercentage != nil {
+			uw.Utilization = *stdin.RateLimits.FiveHour.UsedPercentage
 		}
-	}
-	return getOAuthTokenFromFile(credentialsPath)
-}
-
-// getOAuthTokenFromKeychain tries to read the token from macOS keychain.
-func getOAuthTokenFromKeychain() (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "security", "find-generic-password", "-s", "Claude Code-credentials", "-w")
-	out, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("keychain: %w", err)
+		if stdin.RateLimits.FiveHour.ResetsAt != nil {
+			uw.ResetsAt = time.Unix(int64(*stdin.RateLimits.FiveHour.ResetsAt), 0).UTC().Format(time.RFC3339)
+		}
+		data.FiveHour = uw
 	}
 
-	var creds credentialsJSON
-	if err := json.Unmarshal(out, &creds); err != nil {
-		return "", fmt.Errorf("keychain JSON: %w", err)
+	if stdin.RateLimits.SevenDay != nil {
+		uw := &UsageWindow{}
+		if stdin.RateLimits.SevenDay.UsedPercentage != nil {
+			uw.Utilization = *stdin.RateLimits.SevenDay.UsedPercentage
+		}
+		if stdin.RateLimits.SevenDay.ResetsAt != nil {
+			uw.ResetsAt = time.Unix(int64(*stdin.RateLimits.SevenDay.ResetsAt), 0).UTC().Format(time.RFC3339)
+		}
+		data.SevenDay = uw
 	}
-	if creds.ClaudeAiOauth.AccessToken == "" {
-		return "", fmt.Errorf("keychain: empty access token")
-	}
-	return creds.ClaudeAiOauth.AccessToken, nil
-}
 
-// getOAuthTokenFromFile reads the token from a credentials JSON file.
-func getOAuthTokenFromFile(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("credentials file: %w", err)
-	}
-	var creds credentialsJSON
-	if err := json.Unmarshal(data, &creds); err != nil {
-		return "", fmt.Errorf("credentials JSON: %w", err)
-	}
-	if creds.ClaudeAiOauth.AccessToken == "" {
-		return "", fmt.Errorf("credentials: empty access token")
-	}
-	return creds.ClaudeAiOauth.AccessToken, nil
-}
-
-// convertStdinRateLimits converts stdin RateLimits to UsageData.
-func convertStdinRateLimits(rl *RateLimits) *UsageData {
-	data := &UsageData{
-		FetchedAt: time.Now().Unix(),
-	}
-	if rl.FiveHour != nil {
-		data.FiveHour = convertWindow(rl.FiveHour)
-	}
-	if rl.SevenDay != nil {
-		data.SevenDay = convertWindow(rl.SevenDay)
-	}
 	return data
-}
-
-// convertWindow converts a stdin RateLimitWindow to a UsageWindow.
-func convertWindow(w *RateLimitWindow) *UsageWindow {
-	uw := &UsageWindow{}
-	if w.UsedPercentage != nil {
-		uw.Utilization = *w.UsedPercentage
-	}
-	if w.ResetsAt != nil {
-		uw.ResetsAt = time.Unix(int64(*w.ResetsAt), 0).UTC().Format(time.RFC3339)
-	}
-	return uw
-}
-
-// usageCachePath returns the cache file path for usage data.
-func usageCachePath(cacheDir string) string {
-	return filepath.Join(cacheDir, "claude-statusline-usage.json")
-}
-
-// usageBackoffPath returns the path for the 429 backoff marker file.
-func usageBackoffPath(cacheDir string) string {
-	return filepath.Join(cacheDir, "claude-statusline-usage-backoff")
-}
-
-const (
-	usageCacheTTL      = 600 // 10 minutes — usage data changes slowly
-	usageBackoffTTL    = 300 // 5 minutes — don't retry after 429
-	usageFetchTimeout  = 5 * time.Second
-	usageWaitTimeout   = 200 * time.Millisecond
-	usageAPIURL        = "https://api.anthropic.com/api/oauth/usage"
-	usageAPIBetaHeader = "oauth-2025-04-20"
-)
-
-// isBackedOff returns true if we recently got a 429 and should not retry.
-func isBackedOff(cacheDir string) bool {
-	path := usageBackoffPath(cacheDir)
-	info, err := os.Stat(path)
-	if err != nil {
-		return false
-	}
-	age := time.Since(info.ModTime()).Seconds()
-	return age < usageBackoffTTL
-}
-
-// markBackoff writes a backoff marker file after a 429 response.
-func markBackoff(cacheDir string) {
-	path := usageBackoffPath(cacheDir)
-	os.WriteFile(path, []byte("429"), 0644)
-}
-
-// GetUsageData returns usage/rate limit data using a multi-phase approach:
-// 1. If stdin has rate limits, use those directly (no API call needed).
-// 2. If cache is fresh, use it.
-// 3. If backed off from 429, return stale cache.
-// 4. Otherwise, start background fetch, wait up to 200ms, return whatever is available.
-func GetUsageData(cacheDir string, stdin *StdinData) (*UsageData, *sync.WaitGroup) {
-	var wg sync.WaitGroup
-
-	// Phase 1: stdin rate limits (v2.1.80+, plan-dependent)
-	if stdin.RateLimits != nil {
-		data := convertStdinRateLimits(stdin.RateLimits)
-		return data, &wg
-	}
-
-	// Phase 2: cache
-	cachePath := usageCachePath(cacheDir)
-	cached := readUsageCache(cachePath)
-
-	if cached != nil && !cached.IsStale(usageCacheTTL) {
-		return cached, &wg
-	}
-
-	// Phase 3: check 429 backoff
-	if isBackedOff(cacheDir) {
-		return cached, &wg
-	}
-
-	// Phase 4: background fetch
-	version := stdin.Version
-	ch := make(chan *UsageData, 1)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		result := fetchUsageFromAPI(cachePath, cacheDir, version)
-		ch <- result
-	}()
-
-	// Wait up to 200ms for fresh data
-	select {
-	case fresh := <-ch:
-		if fresh != nil {
-			return fresh, &wg
-		}
-		return cached, &wg
-	case <-time.After(usageWaitTimeout):
-		return cached, &wg
-	}
-}
-
-// fetchUsageFromAPI fetches usage data from the API and writes it to cache.
-// On 429, writes a backoff marker. Returns the fetched data or nil on failure.
-func fetchUsageFromAPI(cachePath, cacheDir, version string) *UsageData {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return nil
-	}
-	credentialsPath := filepath.Join(homeDir, ".claude", ".credentials.json")
-
-	token, err := getOAuthToken(credentialsPath)
-	if err != nil {
-		return nil
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), usageFetchTimeout)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, "GET", usageAPIURL, nil)
-	if err != nil {
-		return nil
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("anthropic-beta", usageAPIBetaHeader)
-
-	// Use claude-code User-Agent to get the generous rate limit bucket.
-	// Without this, the API applies a much stricter rate limit (~5 requests then permanent 429).
-	// See: https://github.com/anthropics/claude-code/issues/30930
-	if version == "" {
-		version = "2.1.81"
-	}
-	req.Header.Set("User-Agent", "claude-code/"+version)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusTooManyRequests {
-		markBackoff(cacheDir)
-		return nil
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil
-	}
-
-	var data UsageData
-	if err := json.Unmarshal(body, &data); err != nil {
-		return nil
-	}
-	data.FetchedAt = time.Now().Unix()
-
-	// Clear any backoff marker on success
-	os.Remove(usageBackoffPath(cacheDir))
-
-	writeUsageCache(cachePath, &data)
-
-	return &data
 }
