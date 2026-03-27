@@ -285,59 +285,15 @@ func buildContextSection(stdin *StdinData, compact CompactInfo) string {
 	return b.String()
 }
 
-// buildUsageSection builds the 5h/7d/extra usage display.
+// buildUsageSection builds the 5h/7d usage display.
 func buildUsageSection(usage *UsageData) string {
 	if usage == nil {
 		return cMuted + "5h:\u2014" + cReset + sep() + cMuted + "7d:\u2014" + cReset
 	}
 
 	var parts []string
-
-	// 5h window
 	parts = append(parts, formatUsageWindow("5h", usage.FiveHour))
-
-	// 7d window
 	parts = append(parts, formatUsageWindow("7d", usage.SevenDay))
-
-	// Check for any reset time in the past
-	now := time.Now()
-	hasOldReset := false
-	if usage.FiveHour != nil && usage.FiveHour.ResetsAt != "" {
-		if resetTime, err := time.Parse(time.RFC3339, usage.FiveHour.ResetsAt); err == nil {
-			if resetTime.Before(now) {
-				hasOldReset = true
-			}
-		}
-	}
-	if usage.SevenDay != nil && usage.SevenDay.ResetsAt != "" {
-		if resetTime, err := time.Parse(time.RFC3339, usage.SevenDay.ResetsAt); err == nil {
-			if resetTime.Before(now) {
-				hasOldReset = true
-			}
-		}
-	}
-
-	// Staleness indicator
-	age := now.Unix() - usage.FetchedAt
-	if age > 60 {
-		mins := age / 60
-		parts = append(parts, cMuted+fmt.Sprintf("(~%dm)", mins)+cReset)
-	}
-
-	if hasOldReset {
-		parts = append(parts, cWarn+"(old)"+cReset)
-	}
-
-	// Extra usage
-	if usage.ExtraUsage != nil && usage.ExtraUsage.IsEnabled {
-		pct := int(usage.ExtraUsage.Utilization)
-		color := getSemanticColor(pct)
-		extraStr := fmt.Sprintf("%sExtra:%d%%%s ($%d/$%d)",
-			color, pct, cReset,
-			int(usage.ExtraUsage.UsedCredits/100),
-			int(usage.ExtraUsage.MonthlyLimit/100))
-		parts = append(parts, extraStr)
-	}
 
 	return strings.Join(parts, sep())
 }
