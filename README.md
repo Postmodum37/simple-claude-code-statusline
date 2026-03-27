@@ -50,9 +50,9 @@ Shows abbreviated model names: Opus 4.6, Sonnet 4.5, Haiku, etc.
 
 ## Requirements
 
-- `git` - Repository status (optional)
+- `git` — Repository status (optional)
 
-The plugin ships as pre-compiled Go binaries with no runtime dependencies. On macOS, it uses the `security` command to retrieve OAuth tokens from keychain.
+The plugin ships as pre-compiled Go binaries with no runtime dependencies.
 
 ## Installation
 
@@ -110,17 +110,17 @@ Fork the repo and edit the Go source. Colors are defined as constants in `src/re
 
 ## JSON Input Reference
 
-Claude Code pipes JSON to statusline commands via stdin. Here's what's available (as of Claude Code v2.1.63):
+Claude Code pipes JSON to statusline commands via stdin. Here's the complete schema (as of Claude Code v2.1.85):
 
 ```json
 {
-  "hook_event_name": "Status",
   "session_id": "abc123...",
   "cwd": "/current/working/directory",
-  "version": "2.1.63",
+  "version": "2.1.85",
+  "transcript_path": "/path/to/transcript.jsonl",
   "model": {
     "id": "claude-opus-4-6",
-    "display_name": "Opus 4.6"
+    "display_name": "Opus"
   },
   "workspace": {
     "current_dir": "/current/working/directory",
@@ -129,14 +129,16 @@ Claude Code pipes JSON to statusline commands via stdin. Here's what's available
   "cost": {
     "total_cost_usd": 0.05,
     "total_duration_ms": 120000,
+    "total_api_duration_ms": 95000,
     "total_lines_added": 156,
-    "total_lines_removed": 23,
-    "total_api_duration_ms": 95000
+    "total_lines_removed": 23
   },
   "context_window": {
     "context_window_size": 200000,
     "used_percentage": 45,
     "remaining_percentage": 55,
+    "total_input_tokens": 15234,
+    "total_output_tokens": 4521,
     "current_usage": {
       "input_tokens": 50000,
       "output_tokens": 20000,
@@ -145,33 +147,67 @@ Claude Code pipes JSON to statusline commands via stdin. Here's what's available
     }
   },
   "exceeds_200k_tokens": false,
-  "transcript_path": "/path/to/transcript.jsonl",
+  "rate_limits": {
+    "five_hour": {
+      "used_percentage": 23.5,
+      "resets_at": 1738425600
+    },
+    "seven_day": {
+      "used_percentage": 41.2,
+      "resets_at": 1738857600
+    }
+  },
+  "vim": {
+    "mode": "NORMAL"
+  },
+  "output_style": {
+    "name": "default"
+  },
   "agent": {
     "name": "my-agent"
+  },
+  "worktree": {
+    "name": "my-feature",
+    "path": "/path/to/.claude/worktrees/my-feature",
+    "branch": "worktree-my-feature",
+    "original_cwd": "/path/to/project",
+    "original_branch": "main"
   }
 }
 ```
 
-| Field | Description |
-|-------|-------------|
-| `model.id` / `model.display_name` | Current model identifier and display name |
-| `cwd` / `workspace.project_dir` | Current working directory and project root |
-| `context_window.used_percentage` | Percentage of context used (0-100) |
-| `context_window.remaining_percentage` | Percentage remaining (0-100) |
-| `context_window.current_usage.*` | Per-API-call token breakdown by type |
-| `exceeds_200k_tokens` | Whether token count exceeds 200k (fast mode pricing threshold) |
-| `cost.total_lines_added` / `cost.total_lines_removed` | Session-cumulative lines changed |
-| `cost.total_cost_usd` / `cost.total_duration_ms` | Session cost and duration |
-| `agent.name` | Agent name when using `--agent` flag |
+| Field | Used | Description |
+|-------|------|-------------|
+| `model.id` / `model.display_name` | Yes | Current model identifier and display name |
+| `cwd` / `workspace.current_dir` | Yes | Current working directory |
+| `workspace.project_dir` | Yes | Directory where Claude Code was launched |
+| `context_window.used_percentage` | Yes | Percentage of context used (0-100) |
+| `context_window.remaining_percentage` | — | Percentage remaining (inverse of used) |
+| `context_window.context_window_size` | Yes | Maximum context window size in tokens |
+| `context_window.current_usage.*` | Yes | Per-API-call token breakdown by type |
+| `context_window.total_input_tokens` / `total_output_tokens` | — | Cumulative session token counts |
+| `exceeds_200k_tokens` | Yes | Whether token count exceeds 200k (fast mode pricing threshold) |
+| `cost.total_cost_usd` | Yes | Session cost in USD |
+| `cost.total_duration_ms` | Yes | Session wall-clock time |
+| `cost.total_api_duration_ms` | — | Time spent waiting for API responses |
+| `cost.total_lines_added` / `total_lines_removed` | Yes | Session-cumulative lines changed |
+| `rate_limits.five_hour.*` / `seven_day.*` | Yes | Rate limit usage (v2.1.80+, Claude.ai Pro/Max only) |
+| `agent.name` | Yes | Agent name when using `--agent` flag |
+| `worktree.name` | Yes | Worktree name during `--worktree` sessions |
+| `worktree.branch` / `.path` / `.original_cwd` / `.original_branch` | — | Additional worktree details |
+| `session_id` | — | Unique session identifier |
+| `version` | — | Claude Code version string |
+| `transcript_path` | — | Path to conversation transcript file |
+| `vim.mode` | — | Vim mode (NORMAL/INSERT) when vim mode is enabled |
+| `output_style.name` | — | Current output style name |
 
-### Rate Limits (via OAuth API)
+**Fields that may be absent:** `vim`, `agent`, `worktree`, `rate_limits` (Pro/Max only, after first API response).
 
-This plugin also fetches rate limit data from the Anthropic API (requires OAuth authentication):
+**Fields that may be null:** `context_window.used_percentage`, `context_window.current_usage` (before first API call).
 
-- **macOS:** Uses keychain (`security find-generic-password`)
-- **Linux:** Reads from `~/.claude/.credentials.json`
+### Rate Limits
 
-The API returns 5-hour and 7-day utilization percentages with reset times.
+Rate limits are provided natively by Claude Code (v2.1.80+) via the `rate_limits` field. This plugin displays 5-hour and 7-day utilization percentages with time until reset. The field is only present for Claude.ai subscribers (Pro/Max) after the first API response in the session.
 
 ## Testing
 
