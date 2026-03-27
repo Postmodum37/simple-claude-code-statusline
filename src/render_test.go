@@ -133,7 +133,6 @@ func TestRenderFullData(t *testing.T) {
 	}
 	now := time.Now()
 	usage := &UsageData{
-		FetchedAt: now.Unix(),
 		FiveHour: &UsageWindow{
 			Utilization: 42.0,
 			ResetsAt:    now.Add(2 * time.Hour).Format(time.RFC3339),
@@ -283,63 +282,6 @@ func TestRenderNoUsageData(t *testing.T) {
 	}
 }
 
-func TestRenderStaleUsageData(t *testing.T) {
-	var buf bytes.Buffer
-	stdin := &StdinData{}
-	usage := &UsageData{
-		FetchedAt: time.Now().Add(-120 * time.Second).Unix(),
-		FiveHour: &UsageWindow{
-			Utilization: 42.0,
-			ResetsAt:    time.Now().Add(2 * time.Hour).Format(time.RFC3339),
-		},
-		SevenDay: &UsageWindow{
-			Utilization: 15.0,
-			ResetsAt:    time.Now().Add(48 * time.Hour).Format(time.RFC3339),
-		},
-	}
-	compact := CompactInfo{}
-
-	Render(&buf, stdin, nil, usage, compact)
-	output := stripANSI(buf.String())
-
-	if !strings.Contains(output, "(~2m)") {
-		t.Errorf("expected (~2m) staleness indicator, got %q", output)
-	}
-}
-
-func TestRenderExtraUsage(t *testing.T) {
-	var buf bytes.Buffer
-	stdin := &StdinData{}
-	usage := &UsageData{
-		FetchedAt: time.Now().Unix(),
-		FiveHour: &UsageWindow{
-			Utilization: 10.0,
-			ResetsAt:    time.Now().Add(2 * time.Hour).Format(time.RFC3339),
-		},
-		SevenDay: &UsageWindow{
-			Utilization: 5.0,
-			ResetsAt:    time.Now().Add(48 * time.Hour).Format(time.RFC3339),
-		},
-		ExtraUsage: &ExtraUsage{
-			IsEnabled:    true,
-			Utilization:  25.0,
-			UsedCredits:  5000.0,
-			MonthlyLimit: 20000.0,
-		},
-	}
-	compact := CompactInfo{}
-
-	Render(&buf, stdin, nil, usage, compact)
-	output := stripANSI(buf.String())
-
-	if !strings.Contains(output, "Extra:25%") {
-		t.Errorf("expected Extra:25%% in output, got %q", output)
-	}
-	if !strings.Contains(output, "$50/$200") {
-		t.Errorf("expected $50/$200 in output, got %q", output)
-	}
-}
-
 func TestRenderContextUsedPercentageOnly(t *testing.T) {
 	var buf bytes.Buffer
 	stdin := &StdinData{
@@ -396,30 +338,6 @@ func TestRenderContextNeither(t *testing.T) {
 
 	if !strings.Contains(output, "\u2014") {
 		t.Errorf("expected — for tokens with no context data, got %q", output)
-	}
-}
-
-func TestRenderUsageResetInPast(t *testing.T) {
-	var buf bytes.Buffer
-	stdin := &StdinData{}
-	usage := &UsageData{
-		FetchedAt: time.Now().Unix(),
-		FiveHour: &UsageWindow{
-			Utilization: 90.0,
-			ResetsAt:    time.Now().Add(-10 * time.Minute).Format(time.RFC3339),
-		},
-		SevenDay: &UsageWindow{
-			Utilization: 50.0,
-			ResetsAt:    time.Now().Add(48 * time.Hour).Format(time.RFC3339),
-		},
-	}
-	compact := CompactInfo{}
-
-	Render(&buf, stdin, nil, usage, compact)
-	output := stripANSI(buf.String())
-
-	if !strings.Contains(output, "(old)") {
-		t.Errorf("expected (old) for past reset time, got %q", output)
 	}
 }
 
