@@ -128,8 +128,12 @@ func buildRow1(stdin *StdinData, git *GitStatus) string {
 	if git != nil && git.Branch != "" {
 		gitPart := cAccent + git.Branch + cReset
 
-		if git.Worktree != "" {
-			gitPart += " " + cMuted + "[wt:" + git.Worktree + "]" + cReset
+		worktreeName := git.Worktree
+		if stdin.Worktree != nil && stdin.Worktree.Name != "" {
+			worktreeName = stdin.Worktree.Name
+		}
+		if worktreeName != "" {
+			gitPart += " " + cMuted + "[wt:" + worktreeName + "]" + cReset
 		}
 
 		var statusParts []string

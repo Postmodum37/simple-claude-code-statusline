@@ -341,6 +341,57 @@ func TestRenderContextNeither(t *testing.T) {
 	}
 }
 
+func TestRenderWorktreeFromStdin(t *testing.T) {
+	var buf bytes.Buffer
+	stdin := &StdinData{
+		Model:     ModelInfo{ID: "claude-opus-4-6", DisplayName: "Opus"},
+		CWD:       "/path/to/.claude/worktrees/my-feature",
+		Workspace: WorkspaceInfo{ProjectDir: "/path/to/.claude/worktrees/my-feature"},
+		Worktree: &WorktreeInfo{
+			Name:   "my-feature",
+			Branch: "worktree-my-feature",
+		},
+	}
+	git := &GitStatus{
+		Branch:   "worktree-my-feature",
+		Worktree: "other-name",
+	}
+	compact := CompactInfo{}
+
+	Render(&buf, stdin, git, nil, compact)
+	output := stripANSI(buf.String())
+	row1 := strings.Split(output, "\n")[0]
+
+	if !strings.Contains(row1, "[wt:my-feature]") {
+		t.Errorf("row1 should use stdin worktree name, got %q", row1)
+	}
+	if strings.Contains(row1, "[wt:other-name]") {
+		t.Errorf("row1 should NOT use git worktree name, got %q", row1)
+	}
+}
+
+func TestRenderWorktreeFromGitFallback(t *testing.T) {
+	var buf bytes.Buffer
+	stdin := &StdinData{
+		Model:     ModelInfo{ID: "claude-opus-4-6", DisplayName: "Opus"},
+		CWD:       "/path/to/project",
+		Workspace: WorkspaceInfo{ProjectDir: "/path/to/project"},
+	}
+	git := &GitStatus{
+		Branch:   "main",
+		Worktree: "git-detected",
+	}
+	compact := CompactInfo{}
+
+	Render(&buf, stdin, git, nil, compact)
+	output := stripANSI(buf.String())
+	row1 := strings.Split(output, "\n")[0]
+
+	if !strings.Contains(row1, "[wt:git-detected]") {
+		t.Errorf("row1 should fall back to git worktree name, got %q", row1)
+	}
+}
+
 // --- helpers ---
 
 func ptrFloat64(f float64) *float64 {
