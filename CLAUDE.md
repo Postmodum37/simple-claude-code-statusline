@@ -130,7 +130,7 @@ Do NOT bump version for:
 
 Track which Claude Code versions have been reviewed for statusline-relevant changes.
 
-### Last reviewed: v2.1.63 (Mar 3, 2026)
+### Last reviewed: v2.1.85 (Mar 27, 2026)
 
 **v2.1.29–v2.1.31** — No statusline-impacting changes. v2.1.31 reduced terminal layout jitter during spinner transitions, which may improve statusline rendering stability.
 
@@ -168,20 +168,36 @@ Track which Claude Code versions have been reviewed for statusline-relevant chan
 
 **v2.1.63** — HTTP hooks; `/simplify` and `/batch` commands; memory leak fixes; `ENABLE_CLAUDEAI_MCP_SERVERS=false`. No statusline changes.
 
-### Statusline JSON field changes in v2.1.29–v2.1.63
+**v2.1.64–v2.1.68** — Opus 4/4.1 removed (users auto-migrated to Opus 4.6). Effort defaults to medium for Opus 4.6 on Max/Team. No statusline field changes.
 
-v2.1.47 added `workspace.added_dirs`. v2.1.50 introduced the `[1m]` suffix on model IDs for 1M context models (handled in `src/model.go` — we strip `[...]` before version parsing). All other statusline fields remained stable. The SDK gained rate limit types in v2.1.45 (`SDKRateLimitInfo`) but rate limit data is still not exposed in statusline JSON.
+**v2.1.69** — `worktree` object added to statusline JSON (`name`, `path`, `branch`, `original_cwd`, `original_branch`). Present only during `--worktree` sessions. Effort display added to Claude Code's own logo/spinner.
 
-### Usage API changes (not in Claude Code changelog)
+**v2.1.70–v2.1.76** — `/effort` command added (v2.1.76). Effort levels simplified to low/medium/high (v2.1.72). 1M context for Opus 4.6 default for Max/Team/Enterprise (v2.1.75). `PostCompact` hook added (v2.1.76). No new statusline JSON fields.
 
-The `/api/oauth/usage` response now includes per-model rate limit fields (`seven_day_opus`, `seven_day_sonnet`, `seven_day_oauth_apps`, `seven_day_cowork`) and an unknown `iguana_necktie` field. These are additive — existing `five_hour` and `seven_day` fields are unchanged. `extra_usage.utilization` can now be `null` (Go's zero-value handles this).
+**v2.1.77–v2.1.79** — Opus 4.6 output tokens increased to 64k (v2.1.77). Status line vim mode toggle fix (v2.1.77). Status line workspace trust fix (v2.1.79). `StopFailure` hook (v2.1.78). No new statusline JSON fields.
+
+**v2.1.80** — **`rate_limits` field added to statusline JSON** with `five_hour` and `seven_day` windows, each containing `used_percentage` (0-100) and `resets_at` (Unix epoch seconds). Only present for Claude.ai Pro/Max subscribers after the first API response. This eliminated the need for our OAuth API call.
+
+**v2.1.81–v2.1.83** — `CwdChanged`/`FileChanged` hooks (v2.1.83). Transcript search (v2.1.83). No statusline field changes.
+
+**v2.1.84** — Token counts >=1M display as "1.5m" in Claude Code's UI (our formatting already handles this). `${CLAUDE_PLUGIN_DATA}` variable for persistent plugin state. Plugin `userConfig` options with keychain storage. No statusline field changes.
+
+**v2.1.85** — Conditional `if` field for hooks (reduces process spawning). No statusline field changes.
+
+### Statusline JSON field changes in v2.1.29–v2.1.85
+
+v2.1.47 added `workspace.added_dirs`. v2.1.50 introduced the `[1m]` suffix on model IDs for 1M context models (handled in `src/model.go` — we strip `[...]` before version parsing). v2.1.69 added the `worktree` object (name, path, branch, original_cwd, original_branch). v2.1.80 added `rate_limits` with five_hour/seven_day windows. All other fields remained stable.
+
+### Usage API changes
+
+The OAuth API call to `/api/oauth/usage` has been removed as of plugin v2.1.0. Rate limit data is now sourced exclusively from the native `rate_limits` field in stdin JSON (available since Claude Code v2.1.80). Users on older Claude Code versions will see dashes for rate limit data.
 
 ### Available JSON fields not yet used
 
 These exist in the statusline JSON but we don't leverage them:
 
-- `version` — Claude Code version string (e.g., "2.1.63")
-- `vim.mode` — current vim mode
+- `version` — Claude Code version string (e.g., "2.1.85")
+- `vim.mode` — current vim mode (NORMAL/INSERT)
 - `output_style.name` — current output style
 - `cost.total_api_duration_ms` — API time vs wall time
 - `context_window.remaining_percentage` — pre-calculated remaining % (inverse of `used_percentage`)
@@ -189,8 +205,14 @@ These exist in the statusline JSON but we don't leverage them:
 - `context_window.total_input_tokens` — cumulative input tokens across session
 - `context_window.total_output_tokens` — cumulative output tokens across session
 - `workspace.added_dirs` — directories added via `/add-dir` (since v2.1.47)
+- `worktree.path` — absolute path to worktree directory
+- `worktree.original_cwd` — directory before entering worktree
+- `worktree.original_branch` — git branch before entering worktree
 
 ### Open issues to track
 
-- [#22221](https://github.com/anthropics/claude-code/issues/22221) — Expose rate limits in statusline JSON (would eliminate our OAuth API call; open, labeled `enhancement`/`med-priority`, no assignees. SDK has rate limit types since v2.1.45 but still not in statusline input)
-- [#17959](https://github.com/anthropics/claude-code/issues/17959) — `used_percentage` mismatch with Claude Code's internal "Context low" warning (marked stale by bot)
+- [#22221](https://github.com/anthropics/claude-code/issues/22221) — Expose rate limits in statusline JSON (partially resolved by v2.1.80 which added `rate_limits`; original request also asked for billing cycle/plan-level data which is not yet available)
+- [#38392](https://github.com/anthropics/claude-code/issues/38392) / [#39399](https://github.com/anthropics/claude-code/issues/39399) / [#37764](https://github.com/anthropics/claude-code/issues/37764) / [#37701](https://github.com/anthropics/claude-code/issues/37701) / [#36187](https://github.com/anthropics/claude-code/issues/36187) — Add effort level to statusline JSON (most-requested missing field, 5+ duplicate issues)
+- [#39420](https://github.com/anthropics/claude-code/issues/39420) — Add permission_mode to statusline JSON
+- [#37227](https://github.com/anthropics/claude-code/issues/37227) — Expose per-model rate limits (e.g., separate Sonnet limits) in statusline `rate_limits` field
+- [#33310](https://github.com/anthropics/claude-code/issues/33310) — Expose background task count in statusLine JSON input (stale)
