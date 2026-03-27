@@ -17,6 +17,7 @@ type StdinData struct {
 	TranscriptPath string        `json:"transcript_path"`
 	Version        string        `json:"version"`
 	RateLimits     *RateLimits   `json:"rate_limits,omitempty"`
+	Worktree       *WorktreeInfo `json:"worktree,omitempty"`
 }
 
 type ModelInfo struct {
@@ -50,6 +51,14 @@ type CostInfo struct {
 
 type AgentInfo struct {
 	Name string `json:"name"`
+}
+
+type WorktreeInfo struct {
+	Name           string `json:"name"`
+	Path           string `json:"path"`
+	Branch         string `json:"branch"`
+	OriginalCWD    string `json:"original_cwd"`
+	OriginalBranch string `json:"original_branch"`
 }
 
 type RateLimits struct {
