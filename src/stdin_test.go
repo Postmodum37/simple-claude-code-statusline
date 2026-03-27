@@ -283,3 +283,65 @@ func TestParseStdin_InvalidJSON(t *testing.T) {
 		t.Error("expected error for invalid JSON, got nil")
 	}
 }
+
+func TestParseStdin_WorktreePresent(t *testing.T) {
+	input := `{
+		"worktree": {
+			"name": "my-feature",
+			"path": "/path/to/.claude/worktrees/my-feature",
+			"branch": "worktree-my-feature",
+			"original_cwd": "/path/to/project",
+			"original_branch": "main"
+		}
+	}`
+	data, err := ParseStdin(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if data.Worktree == nil {
+		t.Fatal("Worktree is nil, want non-nil")
+	}
+	if data.Worktree.Name != "my-feature" {
+		t.Errorf("Worktree.Name = %q, want %q", data.Worktree.Name, "my-feature")
+	}
+	if data.Worktree.Path != "/path/to/.claude/worktrees/my-feature" {
+		t.Errorf("Worktree.Path = %q, want %q", data.Worktree.Path, "/path/to/.claude/worktrees/my-feature")
+	}
+	if data.Worktree.Branch != "worktree-my-feature" {
+		t.Errorf("Worktree.Branch = %q, want %q", data.Worktree.Branch, "worktree-my-feature")
+	}
+	if data.Worktree.OriginalCWD != "/path/to/project" {
+		t.Errorf("Worktree.OriginalCWD = %q, want %q", data.Worktree.OriginalCWD, "/path/to/project")
+	}
+	if data.Worktree.OriginalBranch != "main" {
+		t.Errorf("Worktree.OriginalBranch = %q, want %q", data.Worktree.OriginalBranch, "main")
+	}
+}
+
+func TestParseStdin_WorktreeAbsent(t *testing.T) {
+	input := `{"model": {"id": "test"}}`
+	data, err := ParseStdin(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if data.Worktree != nil {
+		t.Errorf("Worktree = %v, want nil", data.Worktree)
+	}
+}
+
+func TestParseStdin_WorktreePartial(t *testing.T) {
+	input := `{"worktree": {"name": "my-feature"}}`
+	data, err := ParseStdin(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if data.Worktree == nil {
+		t.Fatal("Worktree is nil, want non-nil")
+	}
+	if data.Worktree.Name != "my-feature" {
+		t.Errorf("Worktree.Name = %q, want %q", data.Worktree.Name, "my-feature")
+	}
+	if data.Worktree.Branch != "" {
+		t.Errorf("Worktree.Branch = %q, want empty (absent in hook-based worktrees)", data.Worktree.Branch)
+	}
+}
