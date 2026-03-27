@@ -18,17 +18,13 @@ func main() {
 
 	// Gather data
 	claudeJSONPath := filepath.Join(os.Getenv("HOME"), ".claude.json")
-	usageData, fetchWg := GetUsageData(cacheDir, stdin)
+	usageData := GetUsageData(stdin)
 	gitData := GetGitStatus(stdin.Workspace.ProjectDir, cacheDir)
 	compactEnabled, compactPct := GetCompactThreshold(stdin.ContextWindow.ContextWindowSize, claudeJSONPath)
 
-	// Phase 1: Render to stdout
+	// Render to stdout
 	Render(os.Stdout, stdin, gitData, usageData, CompactInfo{
 		Enabled:      compactEnabled,
 		ThresholdPct: compactPct,
 	})
-
-	// Phase 2: Close stdout (Claude Code gets output), wait for background fetch
-	os.Stdout.Close()
-	fetchWg.Wait()
 }
