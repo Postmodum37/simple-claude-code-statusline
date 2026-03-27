@@ -170,7 +170,7 @@ func buildRow1(stdin *StdinData, git *GitStatus) string {
 	return strings.Join(parts, sep())
 }
 
-// buildRow2 constructs: {bar} {tokens}/{max} [>200k] [(↻X%)] │ 5h:X% (Ym) │ 7d:X% (Ym) │ [Extra:X%] │ $X.XX │ Xm
+// buildRow2 constructs: {bar} {tokens}/{max} [>200k] [(↻X%)] │ 5h:X% (Ym) │ 7d:X% (Ym) │ $X.XX │ Xm
 func buildRow2(stdin *StdinData, usage *UsageData, compact CompactInfo) string {
 	var parts []string
 
