@@ -48,6 +48,29 @@ func getSemanticColor(pct int) string {
 	}
 }
 
+// effortColor returns the color for an effort level. "auto" is a mode that
+// dynamically selects effort, so it gets the accent color rather than a slot
+// on the cost gradient. Unknown levels fall back to muted for forward
+// compatibility with future tiers.
+func effortColor(level string) string {
+	switch level {
+	case "low":
+		return cMuted
+	case "medium":
+		return cWhite
+	case "high":
+		return cWarn
+	case "xhigh":
+		return cHigh
+	case "max":
+		return cCrit
+	case "auto":
+		return cAccent
+	default:
+		return cMuted
+	}
+}
+
 // --- Progress bar ---
 
 // buildProgressBar builds a 20-character progress bar with optional compact marker.
@@ -106,12 +129,18 @@ func Render(w io.Writer, stdin *StdinData, git *GitStatus, usage *UsageData, com
 	fmt.Fprintf(w, "%s\n%s", row1, row2)
 }
 
-// buildRow1 constructs: {model} [{agent}] │ {dir} │ {branch} [wt:{worktree}] {git_status} │ {+N/-M}
+// buildRow1 constructs: {model}[*][•{effort}] [{agent}] │ {dir} │ {branch} [wt:{worktree}] {git_status} │ {+N/-M}
 func buildRow1(stdin *StdinData, git *GitStatus) string {
 	var parts []string
 
-	// Model + agent
+	// Model + thinking + effort + agent
 	modelPart := cWhite + ModelDisplayName(stdin.Model.ID, stdin.Model.DisplayName) + cReset
+	if stdin.Thinking != nil && stdin.Thinking.Enabled {
+		modelPart += cMuted + "*" + cReset
+	}
+	if stdin.Effort != nil && stdin.Effort.Level != "" {
+		modelPart += cMuted + "•" + cReset + effortColor(stdin.Effort.Level) + stdin.Effort.Level + cReset
+	}
 	if stdin.Agent.Name != "" {
 		modelPart += " " + cMuted + "[" + stdin.Agent.Name + "]" + cReset
 	}

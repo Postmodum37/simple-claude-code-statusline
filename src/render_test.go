@@ -392,6 +392,142 @@ func TestRenderWorktreeFromGitFallback(t *testing.T) {
 	}
 }
 
+// --- effort + thinking tests ---
+
+func TestEffortColor(t *testing.T) {
+	tests := []struct {
+		level string
+		want  string
+	}{
+		{"low", cMuted},
+		{"medium", cWhite},
+		{"high", cWarn},
+		{"xhigh", cHigh},
+		{"max", cCrit},
+		{"auto", cAccent},
+		{"future-tier", cMuted},
+		{"", cMuted},
+	}
+	for _, tt := range tests {
+		got := effortColor(tt.level)
+		if got != tt.want {
+			t.Errorf("effortColor(%q) = %q, want %q", tt.level, got, tt.want)
+		}
+	}
+}
+
+func TestRenderEffortThinkingAbsent(t *testing.T) {
+	var buf bytes.Buffer
+	stdin := &StdinData{
+		Model: ModelInfo{ID: "claude-opus-4-7", DisplayName: "Opus"},
+	}
+	Render(&buf, stdin, nil, nil, CompactInfo{})
+	row1 := strings.Split(stripANSI(buf.String()), "\n")[0]
+
+	if strings.Contains(row1, "*") {
+		t.Errorf("row1 should not contain * when thinking absent, got %q", row1)
+	}
+	if strings.Contains(row1, "•") {
+		t.Errorf("row1 should not contain • when effort absent, got %q", row1)
+	}
+}
+
+func TestRenderEffortHighThinkingOff(t *testing.T) {
+	var buf bytes.Buffer
+	stdin := &StdinData{
+		Model:  ModelInfo{ID: "claude-opus-4-7"},
+		Effort: &EffortInfo{Level: "high"},
+	}
+	Render(&buf, stdin, nil, nil, CompactInfo{})
+	full := buf.String()
+	row1Plain := strings.Split(stripANSI(full), "\n")[0]
+
+	if !strings.Contains(row1Plain, "Opus 4.7•high") {
+		t.Errorf("row1 missing 'Opus 4.7•high', got %q", row1Plain)
+	}
+	if strings.Contains(row1Plain, "*") {
+		t.Errorf("row1 should not contain * when thinking off, got %q", row1Plain)
+	}
+	if !strings.Contains(full, cWarn+"high"+cReset) {
+		t.Errorf("'high' should be colored cWarn, raw output: %q", full)
+	}
+}
+
+func TestRenderEffortMaxThinkingOn(t *testing.T) {
+	var buf bytes.Buffer
+	stdin := &StdinData{
+		Model:    ModelInfo{ID: "claude-opus-4-7"},
+		Effort:   &EffortInfo{Level: "max"},
+		Thinking: &ThinkingInfo{Enabled: true},
+	}
+	Render(&buf, stdin, nil, nil, CompactInfo{})
+	full := buf.String()
+	row1Plain := strings.Split(stripANSI(full), "\n")[0]
+
+	if !strings.Contains(row1Plain, "Opus 4.7*•max") {
+		t.Errorf("row1 missing 'Opus 4.7*•max', got %q", row1Plain)
+	}
+	if !strings.Contains(full, cMuted+"*"+cReset) {
+		t.Errorf("'*' should be colored cMuted, raw output: %q", full)
+	}
+	if !strings.Contains(full, cCrit+"max"+cReset) {
+		t.Errorf("'max' should be colored cCrit, raw output: %q", full)
+	}
+}
+
+func TestRenderEffortAuto(t *testing.T) {
+	var buf bytes.Buffer
+	stdin := &StdinData{
+		Model:  ModelInfo{ID: "claude-opus-4-7"},
+		Effort: &EffortInfo{Level: "auto"},
+	}
+	Render(&buf, stdin, nil, nil, CompactInfo{})
+	full := buf.String()
+
+	if !strings.Contains(full, cAccent+"auto"+cReset) {
+		t.Errorf("'auto' should be colored cAccent, raw output: %q", full)
+	}
+}
+
+func TestRenderEffortUnknownTier(t *testing.T) {
+	var buf bytes.Buffer
+	stdin := &StdinData{
+		Model:  ModelInfo{ID: "claude-opus-4-7"},
+		Effort: &EffortInfo{Level: "future-tier"},
+	}
+	Render(&buf, stdin, nil, nil, CompactInfo{})
+	full := buf.String()
+	row1Plain := strings.Split(stripANSI(full), "\n")[0]
+
+	if !strings.Contains(row1Plain, "Opus 4.7•future-tier") {
+		t.Errorf("row1 missing 'Opus 4.7•future-tier', got %q", row1Plain)
+	}
+	if !strings.Contains(full, cMuted+"future-tier"+cReset) {
+		t.Errorf("unknown tier should be colored cMuted, raw output: %q", full)
+	}
+}
+
+func TestRenderEffortBeforeAgent(t *testing.T) {
+	var buf bytes.Buffer
+	stdin := &StdinData{
+		Model:    ModelInfo{ID: "claude-opus-4-7"},
+		Agent:    AgentInfo{Name: "reviewer"},
+		Effort:   &EffortInfo{Level: "high"},
+		Thinking: &ThinkingInfo{Enabled: true},
+	}
+	Render(&buf, stdin, nil, nil, CompactInfo{})
+	row1 := strings.Split(stripANSI(buf.String()), "\n")[0]
+
+	hi := strings.Index(row1, "high")
+	ag := strings.Index(row1, "[reviewer]")
+	if hi < 0 || ag < 0 {
+		t.Fatalf("row1 missing expected tokens: %q", row1)
+	}
+	if hi >= ag {
+		t.Errorf("effort 'high' should appear before agent '[reviewer]' in row1: %q", row1)
+	}
+}
+
 // --- helpers ---
 
 func ptrFloat64(f float64) *float64 {

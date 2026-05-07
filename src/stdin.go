@@ -18,6 +18,8 @@ type StdinData struct {
 	Version        string        `json:"version"`
 	RateLimits     *RateLimits   `json:"rate_limits,omitempty"`
 	Worktree       *WorktreeInfo `json:"worktree,omitempty"`
+	Effort         *EffortInfo   `json:"effort,omitempty"`
+	Thinking       *ThinkingInfo `json:"thinking,omitempty"`
 }
 
 type ModelInfo struct {
@@ -59,6 +61,14 @@ type WorktreeInfo struct {
 	Branch         string `json:"branch"`
 	OriginalCWD    string `json:"original_cwd"`
 	OriginalBranch string `json:"original_branch"`
+}
+
+type EffortInfo struct {
+	Level string `json:"level"`
+}
+
+type ThinkingInfo struct {
+	Enabled bool `json:"enabled"`
 }
 
 type RateLimits struct {

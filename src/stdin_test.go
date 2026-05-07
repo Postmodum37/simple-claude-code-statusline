@@ -345,3 +345,63 @@ func TestParseStdin_WorktreePartial(t *testing.T) {
 		t.Errorf("Worktree.Branch = %q, want empty (absent in hook-based worktrees)", data.Worktree.Branch)
 	}
 }
+
+func TestParseStdin_EffortLevels(t *testing.T) {
+	levels := []string{"low", "medium", "high", "xhigh", "max", "auto", "future-tier"}
+	for _, level := range levels {
+		input := `{"effort": {"level": "` + level + `"}}`
+		data, err := ParseStdin(strings.NewReader(input))
+		if err != nil {
+			t.Fatalf("level %q: unexpected error: %v", level, err)
+		}
+		if data.Effort == nil {
+			t.Fatalf("level %q: Effort is nil, want non-nil", level)
+		}
+		if data.Effort.Level != level {
+			t.Errorf("level %q: Effort.Level = %q, want %q", level, data.Effort.Level, level)
+		}
+	}
+}
+
+func TestParseStdin_EffortAbsent(t *testing.T) {
+	data, err := ParseStdin(strings.NewReader(`{"model": {"id": "test"}}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if data.Effort != nil {
+		t.Errorf("Effort = %v, want nil", data.Effort)
+	}
+}
+
+func TestParseStdin_ThinkingEnabled(t *testing.T) {
+	for _, enabled := range []bool{true, false} {
+		input := `{"thinking": {"enabled": ` + boolStr(enabled) + `}}`
+		data, err := ParseStdin(strings.NewReader(input))
+		if err != nil {
+			t.Fatalf("enabled=%v: unexpected error: %v", enabled, err)
+		}
+		if data.Thinking == nil {
+			t.Fatalf("enabled=%v: Thinking is nil, want non-nil", enabled)
+		}
+		if data.Thinking.Enabled != enabled {
+			t.Errorf("enabled=%v: Thinking.Enabled = %v, want %v", enabled, data.Thinking.Enabled, enabled)
+		}
+	}
+}
+
+func TestParseStdin_ThinkingAbsent(t *testing.T) {
+	data, err := ParseStdin(strings.NewReader(`{"model": {"id": "test"}}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if data.Thinking != nil {
+		t.Errorf("Thinking = %v, want nil", data.Thinking)
+	}
+}
+
+func boolStr(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
+}
