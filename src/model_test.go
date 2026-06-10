@@ -45,6 +45,21 @@ func TestModelDisplayName(t *testing.T) {
 			want: "Opus 4.6",
 		},
 		{
+			name: "fable single-digit version",
+			id:   "claude-fable-5",
+			want: "Fable 5",
+		},
+		{
+			name: "fable with [1m] context suffix",
+			id:   "claude-fable-5[1m]",
+			want: "Fable 5",
+		},
+		{
+			name: "fable with date suffix",
+			id:   "claude-fable-5-20260601",
+			want: "Fable 5",
+		},
+		{
 			name: "empty id falls back to first word of display name",
 			id:          "",
 			displayName: "Claude 4 Opus",

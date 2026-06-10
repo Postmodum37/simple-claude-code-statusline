@@ -20,6 +20,7 @@ type StdinData struct {
 	Worktree       *WorktreeInfo `json:"worktree,omitempty"`
 	Effort         *EffortInfo   `json:"effort,omitempty"`
 	Thinking       *ThinkingInfo `json:"thinking,omitempty"`
+	PR             *PRInfo       `json:"pr,omitempty"`
 }
 
 type ModelInfo struct {
@@ -65,6 +66,14 @@ type WorktreeInfo struct {
 
 type EffortInfo struct {
 	Level string `json:"level"`
+}
+
+// PRInfo describes the open pull request for the current branch.
+// Present only while Claude Code has detected an open PR (since v2.1.145).
+type PRInfo struct {
+	Number      int    `json:"number"`
+	URL         string `json:"url"`
+	ReviewState string `json:"review_state"` // approved | pending | changes_requested | draft; may be absent
 }
 
 type ThinkingInfo struct {

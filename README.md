@@ -8,14 +8,16 @@ A minimal, hackable two-line statusline for Claude Code.
 
 ## Features
 
-**Line 1:** Model [agent] | Directory | Git branch + status | Session lines changed
+**Line 1:** Model [*thinking] [•effort] [agent] | Directory | Git branch + status + PR badge | Session lines changed
 **Line 2:** Context bar | 5h rate limit | 7d rate limit | Cost | Duration
 
 - Tokyo Night color scheme
 - Context usage with color-coded progress bar
 - Rate limit tracking with time until reset
 - Git branch with added/modified/deleted counts and ahead/behind tracking
+- Open PR badge with review state (`#1234 ⏳`) when Claude Code detects a PR for the current branch
 - Git worktree support with `[wt:name]` indicator
+- Reasoning effort level (`•high`) and extended-thinking marker (`*`)
 - Agent name display when using `--agent` flag
 - Session lines changed (cumulative +added/-removed)
 - Session cost tracking ($X.XX)
@@ -39,6 +41,7 @@ A minimal, hackable two-line statusline for Claude Code.
 
 - **Branch name** with file status counts (✚added/●modified/✖deleted)
 - **Ahead/behind** tracking: `↑2` commits ahead, `↓1` behind upstream
+- **PR badge**: `#1234 ⏳` for the open PR on the current branch — ✓ approved, ⏳ pending, ✗ changes requested, ◌ draft (Claude Code v2.1.145+)
 - **Worktree indicator**: `[wt:feature-name]` when in a linked worktree
 - **Session lines changed**: `+44/-14` cumulative lines added/removed this session
 
@@ -46,7 +49,7 @@ A minimal, hackable two-line statusline for Claude Code.
 
 ![Sonnet model with green context bar](screenshot-sonnet.png)
 
-Shows abbreviated model names: Opus 4.6, Sonnet 4.5, Haiku, etc.
+Shows abbreviated model names: Fable 5, Opus 4.8, Sonnet 4.6, Haiku, etc.
 
 ## Requirements
 
@@ -110,21 +113,29 @@ Fork the repo and edit the Go source. Colors are defined as constants in `src/re
 
 ## JSON Input Reference
 
-Claude Code pipes JSON to statusline commands via stdin. Here's the complete schema (as of Claude Code v2.1.85):
+Claude Code pipes JSON to statusline commands via stdin. Here's the complete schema (as of Claude Code v2.1.170):
 
 ```json
 {
   "session_id": "abc123...",
+  "session_name": "my-session",
   "cwd": "/current/working/directory",
-  "version": "2.1.85",
+  "version": "2.1.170",
   "transcript_path": "/path/to/transcript.jsonl",
   "model": {
-    "id": "claude-opus-4-6",
-    "display_name": "Opus"
+    "id": "claude-fable-5[1m]",
+    "display_name": "Fable 5"
   },
   "workspace": {
     "current_dir": "/current/working/directory",
-    "project_dir": "/original/project/directory"
+    "project_dir": "/original/project/directory",
+    "added_dirs": [],
+    "git_worktree": "feature-xyz",
+    "repo": {
+      "host": "github.com",
+      "owner": "anthropics",
+      "name": "claude-code"
+    }
   },
   "cost": {
     "total_cost_usd": 0.05,
@@ -157,6 +168,12 @@ Claude Code pipes JSON to statusline commands via stdin. Here's the complete sch
       "resets_at": 1738857600
     }
   },
+  "effort": {
+    "level": "high"
+  },
+  "thinking": {
+    "enabled": true
+  },
   "vim": {
     "mode": "NORMAL"
   },
@@ -165,6 +182,11 @@ Claude Code pipes JSON to statusline commands via stdin. Here's the complete sch
   },
   "agent": {
     "name": "my-agent"
+  },
+  "pr": {
+    "number": 1234,
+    "url": "https://github.com/anthropics/claude-code/pull/1234",
+    "review_state": "pending"
   },
   "worktree": {
     "name": "my-feature",
@@ -192,16 +214,24 @@ Claude Code pipes JSON to statusline commands via stdin. Here's the complete sch
 | `cost.total_api_duration_ms` | — | Time spent waiting for API responses |
 | `cost.total_lines_added` / `total_lines_removed` | Yes | Session-cumulative lines changed |
 | `rate_limits.five_hour.*` / `seven_day.*` | Yes | Rate limit usage (v2.1.80+, Claude.ai Pro/Max only) |
+| `effort.level` | Yes | Reasoning effort: `low`/`medium`/`high`/`xhigh`/`max` (v2.1.119+) |
+| `thinking.enabled` | Yes | Whether extended thinking is on (v2.1.119+) |
 | `agent.name` | Yes | Agent name when using `--agent` flag |
+| `pr.number` / `pr.review_state` | Yes | Open PR for current branch + review state (v2.1.145+) |
+| `pr.url` | — | Open PR URL |
+| `workspace.repo.{host,owner,name}` | — | Repo identity from `origin` remote (v2.1.145+) |
+| `workspace.added_dirs` | — | Directories added via `/add-dir` |
+| `workspace.git_worktree` | — | Linked git worktree name (we use `worktree` + git detection instead) |
 | `worktree.name` | Yes | Worktree name during `--worktree` sessions |
 | `worktree.branch` / `.path` / `.original_cwd` / `.original_branch` | — | Additional worktree details |
 | `session_id` | — | Unique session identifier |
+| `session_name` | — | Custom session name from `--name`/`/rename` |
 | `version` | — | Claude Code version string |
 | `transcript_path` | — | Path to conversation transcript file |
 | `vim.mode` | — | Vim mode (NORMAL/INSERT) when vim mode is enabled |
 | `output_style.name` | — | Current output style name |
 
-**Fields that may be absent:** `vim`, `agent`, `worktree`, `rate_limits` (Pro/Max only, after first API response).
+**Fields that may be absent:** `vim`, `agent`, `worktree`, `effort`, `thinking`, `pr` (only while an open PR is detected; `review_state` may be independently absent), `session_name`, `workspace.repo`, `rate_limits` (Pro/Max only, after first API response).
 
 **Fields that may be null:** `context_window.used_percentage`, `context_window.current_usage` (before first API call).
 

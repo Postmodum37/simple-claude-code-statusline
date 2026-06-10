@@ -129,7 +129,7 @@ func Render(w io.Writer, stdin *StdinData, git *GitStatus, usage *UsageData, com
 	fmt.Fprintf(w, "%s\n%s", row1, row2)
 }
 
-// buildRow1 constructs: {model}[*][•{effort}] [{agent}] │ {dir} │ {branch} [wt:{worktree}] {git_status} │ {+N/-M}
+// buildRow1 constructs: {model}[*][•{effort}] [{agent}] │ {dir} │ {branch} [wt:{worktree}] {git_status} [#PR {state}] │ {+N/-M}
 func buildRow1(stdin *StdinData, git *GitStatus) string {
 	var parts []string
 
@@ -185,6 +185,10 @@ func buildRow1(stdin *StdinData, git *GitStatus) string {
 			gitPart += " " + strings.Join(statusParts, " ")
 		}
 
+		if badge := prBadge(stdin.PR); badge != "" {
+			gitPart += " " + badge
+		}
+
 		parts = append(parts, gitPart)
 	}
 
@@ -201,6 +205,25 @@ func buildRow1(stdin *StdinData, git *GitStatus) string {
 	}
 
 	return strings.Join(parts, sep())
+}
+
+// prBadge formats the open-PR badge, e.g. "#1234 ⏳". Returns "" when no PR.
+func prBadge(pr *PRInfo) string {
+	if pr == nil || pr.Number <= 0 {
+		return ""
+	}
+	badge := cMuted + "#" + fmt.Sprintf("%d", pr.Number) + cReset
+	switch pr.ReviewState {
+	case "approved":
+		badge += " " + cGitAdd + "✓" + cReset
+	case "pending":
+		badge += " " + cGitMod + "⏳" + cReset
+	case "changes_requested":
+		badge += " " + cGitDel + "✗" + cReset
+	case "draft":
+		badge += " " + cMuted + "◌" + cReset
+	}
+	return badge
 }
 
 // buildRow2 constructs: {bar} {tokens}/{max} [>200k] [(↻X%)] │ 5h:X% (Ym) │ 7d:X% (Ym) │ $X.XX │ Xm

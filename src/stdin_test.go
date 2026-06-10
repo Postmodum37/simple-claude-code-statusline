@@ -399,6 +399,49 @@ func TestParseStdin_ThinkingAbsent(t *testing.T) {
 	}
 }
 
+func TestParseStdin_PR(t *testing.T) {
+	input := `{"pr": {"number": 1234, "url": "https://github.com/anthropics/claude-code/pull/1234", "review_state": "pending"}}`
+	data, err := ParseStdin(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if data.PR == nil {
+		t.Fatal("PR is nil, want non-nil")
+	}
+	if data.PR.Number != 1234 {
+		t.Errorf("PR.Number = %d, want 1234", data.PR.Number)
+	}
+	if data.PR.URL != "https://github.com/anthropics/claude-code/pull/1234" {
+		t.Errorf("PR.URL = %q", data.PR.URL)
+	}
+	if data.PR.ReviewState != "pending" {
+		t.Errorf("PR.ReviewState = %q, want \"pending\"", data.PR.ReviewState)
+	}
+}
+
+func TestParseStdin_PRAbsent(t *testing.T) {
+	data, err := ParseStdin(strings.NewReader(`{"model": {"id": "test"}}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if data.PR != nil {
+		t.Errorf("PR = %v, want nil", data.PR)
+	}
+}
+
+func TestParseStdin_PRWithoutReviewState(t *testing.T) {
+	data, err := ParseStdin(strings.NewReader(`{"pr": {"number": 7, "url": "https://example.com/pull/7"}}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if data.PR == nil || data.PR.Number != 7 {
+		t.Fatalf("PR = %+v, want Number=7", data.PR)
+	}
+	if data.PR.ReviewState != "" {
+		t.Errorf("PR.ReviewState = %q, want empty", data.PR.ReviewState)
+	}
+}
+
 func boolStr(b bool) string {
 	if b {
 		return "true"

@@ -528,6 +528,63 @@ func TestRenderEffortBeforeAgent(t *testing.T) {
 	}
 }
 
+func TestPRBadge(t *testing.T) {
+	tests := []struct {
+		name string
+		pr   *PRInfo
+		want string
+	}{
+		{"nil PR", nil, ""},
+		{"zero number", &PRInfo{Number: 0, ReviewState: "approved"}, ""},
+		{"no review state", &PRInfo{Number: 42}, cMuted + "#42" + cReset},
+		{"approved", &PRInfo{Number: 42, ReviewState: "approved"}, cMuted + "#42" + cReset + " " + cGitAdd + "✓" + cReset},
+		{"pending", &PRInfo{Number: 42, ReviewState: "pending"}, cMuted + "#42" + cReset + " " + cGitMod + "⏳" + cReset},
+		{"changes requested", &PRInfo{Number: 42, ReviewState: "changes_requested"}, cMuted + "#42" + cReset + " " + cGitDel + "✗" + cReset},
+		{"draft", &PRInfo{Number: 42, ReviewState: "draft"}, cMuted + "#42" + cReset + " " + cMuted + "◌" + cReset},
+		{"unknown state shows number only", &PRInfo{Number: 42, ReviewState: "future-state"}, cMuted + "#42" + cReset},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := prBadge(tt.pr)
+			if got != tt.want {
+				t.Errorf("prBadge(%+v) = %q, want %q", tt.pr, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRenderPRBadgeInGitSegment(t *testing.T) {
+	var buf bytes.Buffer
+	stdin := &StdinData{
+		Model: ModelInfo{ID: "claude-fable-5[1m]"},
+		PR:    &PRInfo{Number: 1234, ReviewState: "pending"},
+	}
+	git := &GitStatus{Branch: "main", Modified: 2}
+	Render(&buf, stdin, git, nil, CompactInfo{})
+	row1 := strings.Split(stripANSI(buf.String()), "\n")[0]
+
+	if !strings.Contains(row1, "Fable 5") {
+		t.Errorf("row1 missing 'Fable 5', got %q", row1)
+	}
+	if !strings.Contains(row1, "main ●2 #1234 ⏳") {
+		t.Errorf("row1 missing PR badge after git status, got %q", row1)
+	}
+}
+
+func TestRenderPRBadgeAbsentWithoutGit(t *testing.T) {
+	var buf bytes.Buffer
+	stdin := &StdinData{
+		Model: ModelInfo{ID: "claude-fable-5"},
+		PR:    &PRInfo{Number: 1234, ReviewState: "approved"},
+	}
+	Render(&buf, stdin, nil, nil, CompactInfo{})
+	row1 := strings.Split(stripANSI(buf.String()), "\n")[0]
+
+	if strings.Contains(row1, "#1234") {
+		t.Errorf("PR badge should not render without git info, got %q", row1)
+	}
+}
+
 // --- helpers ---
 
 func ptrFloat64(f float64) *float64 {

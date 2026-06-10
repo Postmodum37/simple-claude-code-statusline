@@ -32,11 +32,14 @@ Claude Code pipes JSON to the binary via stdin containing:
 - `agent.name` - Agent name (when using `--agent` flag)
 - `worktree.*` - Worktree metadata (only present in `--worktree` sessions, since v2.1.69)
 - `rate_limits.{five_hour,seven_day}` - Rate limit windows (since v2.1.80)
-- `effort.level` - Reasoning effort: `low|medium|high|xhigh|max|auto` (since v2.1.119)
+- `effort.level` - Reasoning effort: `low|medium|high|xhigh|max` (since v2.1.119; docs no longer list `auto` — ultracode reports as `xhigh`)
 - `thinking.enabled` - Whether extended thinking is on (since v2.1.119)
+- `pr.{number,url,review_state}` - Open PR for the current branch (since v2.1.145; absent until a PR is found)
+- `workspace.repo.{host,owner,name}` - Repo identity from the `origin` remote (since v2.1.145)
+- `exceeds_200k_tokens` - Whether the most recent API response exceeded 200k tokens
 
 The binary outputs two lines of ANSI-escaped text:
-1. Model [thinking-marker] [•effort] [agent] | Directory | Git branch + status | Session lines changed
+1. Model [thinking-marker] [•effort] [agent] | Directory | Git branch + status + PR badge | Session lines changed
 2. Context bar | 5h rate limit | 7d rate limit | Cost | Duration
 
 ## Building
@@ -97,11 +100,12 @@ External commands and files used:
 - Adding a new JSON field requires updating the `StdinData` struct in `src/stdin.go` and this file's "Available JSON fields" section
 - Go source is in `src/` with one package (`main`): stdin parsing, model ID parsing, formatting, git status, rate-limit data, auto-compact detection, and ANSI rendering
 - Caches to `${CLAUDE_CODE_TMPDIR:-/tmp}/claude-*` (git: 5s TTL). Atomic writes via tmpfile + rename.
-- Colors use Tokyo Night palette as constants in `src/render.go`. Effort levels use a separate semantic gradient via `effortColor()`: low=muted, medium=white, high=warn, xhigh=high, max=crit, auto=accent (auto is a mode, not a gradient slot).
+- Colors use Tokyo Night palette as constants in `src/render.go`. Effort levels use a separate semantic gradient via `effortColor()`: low=muted, medium=white, high=warn, xhigh=high, max=crit, auto=accent (auto is a mode, not a gradient slot; official docs no longer list `auto` as an `effort.level` value — kept as harmless legacy handling).
 - Thinking-on shows as a muted `*` after the model name; effort shows as `•{level}` after the `*` (when present), both before the agent bracket.
 - Lines changed shows session-cumulative totals from `cost.total_lines_added`/`cost.total_lines_removed`
 - Auto-compact indicator `(↻)` shown when auto-compact is enabled
-- `>200k` indicator shown when token count exceeds 200k (fast mode pricing threshold)
+- `>200k` indicator driven by the native `exceeds_200k_tokens` boolean from stdin (fast mode pricing threshold)
+- PR badge (`prBadge()` in `src/render.go`) renders `#<number>` plus a review-state glyph (✓ approved / ⏳ pending / ✗ changes_requested / ◌ draft) inside the git segment; requires git info to be present
 - Context display uses `used_percentage` as single source of truth for bar/color/percentage. `current_usage.*` drives absolute token count display only. (Note: prior to Claude Code v2.1.132 `current_usage` reported cumulative session totals — that bug is now fixed and the field is trustworthy.)
 
 ## Plugin Development
@@ -132,7 +136,7 @@ Do NOT bump version for:
 
 Track which Claude Code versions have been reviewed for statusline-relevant changes.
 
-### Last reviewed: v2.1.132 (May 7, 2026)
+### Last reviewed: v2.1.170 (June 10, 2026)
 
 **v2.1.29–v2.1.31** — No statusline-impacting changes. v2.1.31 reduced terminal layout jitter during spinner transitions, which may improve statusline rendering stability.
 
@@ -206,9 +210,35 @@ Track which Claude Code versions have been reviewed for statusline-relevant chan
 
 **v2.1.132** — **Critical bug fix:** `context_window.current_usage.{input_tokens,output_tokens}` no longer report cumulative session totals — the values now accurately reflect the current in-flight context window and match `/context` output. We never applied a correction factor, so this fix is invisible to our code, but the field is now trustworthy. Also: `CLAUDE_CODE_SESSION_ID` env var is now set in Bash subprocess environments (not a statusline stdin field).
 
-### Statusline JSON field changes in v2.1.29–v2.1.132
+**v2.1.133** — `effort.level` documented as a hook JSON input field, plus `$CLAUDE_EFFORT` env var for hooks/Bash. Also `worktree.baseRef` setting (`fresh`|`head`) controlling worktree base branch. No new statusline fields (we already consumed `effort.level` since v2.1.119).
 
-v2.1.47 added `workspace.added_dirs`. v2.1.50 introduced the `[1m]` suffix on model IDs for 1M context models (handled in `src/model.go` — we strip `[...]` before version parsing). v2.1.69 added the `worktree` object (name, path, branch, original_cwd, original_branch). v2.1.80 added `rate_limits` with five_hour/seven_day windows. v2.1.97/98 added `workspace.git_worktree` (skipped — redundant with our existing worktree handling). v2.1.119 added `effort.level` and `thinking.enabled` (now displayed inline with the model name). All other fields remained stable.
+**v2.1.134–v2.1.140** — No statusline-relevant changes (`claude agents` view, `/goal` command, auto-mode classifier rules, bug fixes).
+
+**v2.1.141** — Fixed multi-line statusline output dropping/corrupting rows when any line exceeds terminal width. Rendering fix only; no JSON changes.
+
+**v2.1.142** — Fast mode now defaults to Opus 4.7 (was Opus 4.6) — `model.id` in fast-mode sessions changed accordingly.
+
+**v2.1.143–v2.1.144** — `/model` is now session-scoped (press `d` in picker for default), so `model.id` reliably reflects the session model. No JSON shape changes.
+
+**v2.1.145** — **`pr` object added to statusline JSON** (`number`, `url`, `review_state: approved|pending|changes_requested|draft`) — open PR for the current branch, absent until found and removed on merge/close; `review_state` may be independently absent. **`workspace.repo` added** (`host`, `owner`, `name` from the `origin` remote). Also `claude agents --json` for external status bars. PR badge displayed by this plugin from v2.3.0.
+
+**v2.1.147–v2.1.152** — No statusline JSON changes. v2.1.149 fixed `effort.level` to reflect skill/agent `effort:` frontmatter instead of the user's baseline `/effort` setting — treat the field as dynamic per-turn.
+
+**v2.1.153** — Statusline commands now receive `COLUMNS` and `LINES` env vars for terminal-width-aware output. Not used by us yet.
+
+**v2.1.154** — **Claude Opus 4.8 released** (`claude-opus-4-8`), defaults to high effort; `/effort xhigh` promoted for hardest tasks (so `xhigh` is now a common `effort.level` value — already rendered and colored by `effortColor()`). Fast mode moved to Opus 4.8 at 2x rate; `CLAUDE_CODE_OPUS_4_6_FAST_MODE_OVERRIDE` deprecated. Model ID parsing handles 4.8 correctly ("Opus 4.8").
+
+**v2.1.155–v2.1.165** — No statusline changes. Notable: auto mode on Bedrock/Vertex/Foundry for Opus 4.7/4.8 (v2.1.158), `/effort` now confirms persistence as default for new sessions (v2.1.162).
+
+**v2.1.166** — `MAX_THINKING_TOKENS=0`, `--thinking disabled`, and per-model thinking toggle now disable thinking on models that think by default — `thinking.enabled` can now be `false` on such models.
+
+**v2.1.167–v2.1.169** — v2.1.169 fixed footer hints (e.g. "esc to interrupt") not showing for users with a custom statusline. No JSON changes.
+
+**v2.1.170** — **Claude Fable 5 released** (`claude-fable-5`, Mythos-class tier above Opus; appears as `claude-fable-5[1m]` with 1M context). Family parsing for "fable" added to `src/model.go` in plugin v2.3.0 (outputs "Fable 5"); previously it fell through to the displayName fallback and showed just "Fable".
+
+### Statusline JSON field changes in v2.1.29–v2.1.170
+
+v2.1.47 added `workspace.added_dirs`. v2.1.50 introduced the `[1m]` suffix on model IDs for 1M context models (handled in `src/model.go` — we strip `[...]` before version parsing). v2.1.69 added the `worktree` object (name, path, branch, original_cwd, original_branch). v2.1.80 added `rate_limits` with five_hour/seven_day windows. v2.1.97/98 added `workspace.git_worktree` (skipped — redundant with our existing worktree handling). v2.1.119 added `effort.level` and `thinking.enabled` (now displayed inline with the model name). v2.1.145 added `pr.{number,url,review_state}` (displayed as a PR badge in the git segment from plugin v2.3.0) and `workspace.repo.{host,owner,name}` (not used). `session_name` and `workspace.current_dir` are also now documented in the official statusline docs. All other fields remained stable.
 
 ### Statusline-related settings
 
@@ -222,7 +252,11 @@ The OAuth API call to `/api/oauth/usage` has been removed as of plugin v2.1.0. R
 
 These exist in the statusline JSON but we don't leverage them:
 
-- `version` — Claude Code version string (e.g., "2.1.132")
+- `version` — Claude Code version string (e.g., "2.1.170")
+- `session_name` — custom session name from `--name`/`/rename` (absent if unset)
+- `workspace.current_dir` — same value as `cwd`; preferred alias in official docs
+- `workspace.repo.{host,owner,name}` — repo identity from `origin` remote (since v2.1.145)
+- `pr.url` — open PR URL (we display `pr.number` + `pr.review_state` but not the URL)
 - `vim.mode` — current vim mode (NORMAL/INSERT)
 - `output_style.name` — current output style
 - `cost.total_api_duration_ms` — API time vs wall time
