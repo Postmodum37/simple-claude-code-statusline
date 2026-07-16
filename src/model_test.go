@@ -60,6 +60,16 @@ func TestModelDisplayName(t *testing.T) {
 			want: "Fable 5",
 		},
 		{
+			name: "sonnet single-digit version",
+			id:   "claude-sonnet-5",
+			want: "Sonnet 5",
+		},
+		{
+			name: "sonnet single-digit with [1m] context suffix",
+			id:   "claude-sonnet-5[1m]",
+			want: "Sonnet 5",
+		},
+		{
 			name: "empty id falls back to first word of display name",
 			id:          "",
 			displayName: "Claude 4 Opus",

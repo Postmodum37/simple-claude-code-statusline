@@ -113,14 +113,15 @@ Fork the repo and edit the Go source. Colors are defined as constants in `src/re
 
 ## JSON Input Reference
 
-Claude Code pipes JSON to statusline commands via stdin. Here's the complete schema (as of Claude Code v2.1.170):
+Claude Code pipes JSON to statusline commands via stdin. Here's the complete schema (as of Claude Code v2.1.211):
 
 ```json
 {
   "session_id": "abc123...",
   "session_name": "my-session",
+  "prompt_id": "550e8400-e29b-41d4-a716-446655440000",
   "cwd": "/current/working/directory",
-  "version": "2.1.170",
+  "version": "2.1.211",
   "transcript_path": "/path/to/transcript.jsonl",
   "model": {
     "id": "claude-fable-5[1m]",
@@ -207,7 +208,7 @@ Claude Code pipes JSON to statusline commands via stdin. Here's the complete sch
 | `context_window.remaining_percentage` | — | Percentage remaining (inverse of used) |
 | `context_window.context_window_size` | Yes | Maximum context window size in tokens |
 | `context_window.current_usage.*` | Yes | Per-API-call token breakdown by type |
-| `context_window.total_input_tokens` / `total_output_tokens` | — | Cumulative session token counts |
+| `context_window.total_input_tokens` / `total_output_tokens` | — | Tokens currently in the context window, from the most recent API response (cumulative before Claude Code v2.1.132) |
 | `exceeds_200k_tokens` | Yes | Whether token count exceeds 200k (fast mode pricing threshold) |
 | `cost.total_cost_usd` | Yes | Session cost in USD |
 | `cost.total_duration_ms` | Yes | Session wall-clock time |
@@ -226,12 +227,13 @@ Claude Code pipes JSON to statusline commands via stdin. Here's the complete sch
 | `worktree.branch` / `.path` / `.original_cwd` / `.original_branch` | — | Additional worktree details |
 | `session_id` | — | Unique session identifier |
 | `session_name` | — | Custom session name from `--name`/`/rename` |
+| `prompt_id` | — | UUID of the user prompt being processed (v2.1.196+) |
 | `version` | — | Claude Code version string |
 | `transcript_path` | — | Path to conversation transcript file |
-| `vim.mode` | — | Vim mode (NORMAL/INSERT) when vim mode is enabled |
+| `vim.mode` | — | Vim mode (NORMAL/INSERT/VISUAL/VISUAL LINE) when vim mode is enabled |
 | `output_style.name` | — | Current output style name |
 
-**Fields that may be absent:** `vim`, `agent`, `worktree`, `effort`, `thinking`, `pr` (only while an open PR is detected; `review_state` may be independently absent), `session_name`, `workspace.repo`, `rate_limits` (Pro/Max only, after first API response).
+**Fields that may be absent:** `vim`, `agent`, `worktree`, `effort`, `thinking`, `pr` (only while an open PR is detected; `review_state` may be independently absent), `session_name`, `prompt_id` (absent until the first user input), `workspace.repo`, `rate_limits` (Pro/Max only, after first API response).
 
 **Fields that may be null:** `context_window.used_percentage`, `context_window.current_usage` (before first API call).
 

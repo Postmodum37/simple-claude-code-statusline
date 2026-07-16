@@ -136,7 +136,7 @@ Do NOT bump version for:
 
 Track which Claude Code versions have been reviewed for statusline-relevant changes.
 
-### Last reviewed: v2.1.170 (June 10, 2026)
+### Last reviewed: v2.1.211 (July 16, 2026)
 
 **v2.1.29–v2.1.31** — No statusline-impacting changes. v2.1.31 reduced terminal layout jitter during spinner transitions, which may improve statusline rendering stability.
 
@@ -236,9 +236,25 @@ Track which Claude Code versions have been reviewed for statusline-relevant chan
 
 **v2.1.170** — **Claude Fable 5 released** (`claude-fable-5`, Mythos-class tier above Opus; appears as `claude-fable-5[1m]` with 1M context). Family parsing for "fable" added to `src/model.go` in plugin v2.3.0 (outputs "Fable 5"); previously it fell through to the displayName fallback and showed just "Fable".
 
-### Statusline JSON field changes in v2.1.29–v2.1.170
+**v2.1.172–v2.1.175** — No statusline JSON changes. v2.1.172 fixed doubled `[1M][1m]` model-ID suffixes (our parser strips at the first `[`, so it was already tolerant). v2.1.173 fixed Fable 5 `[1m]` normalization — `model.id` for Fable may now arrive without the suffix (handled either way).
 
-v2.1.47 added `workspace.added_dirs`. v2.1.50 introduced the `[1m]` suffix on model IDs for 1M context models (handled in `src/model.go` — we strip `[...]` before version parsing). v2.1.69 added the `worktree` object (name, path, branch, original_cwd, original_branch). v2.1.80 added `rate_limits` with five_hour/seven_day windows. v2.1.97/98 added `workspace.git_worktree` (skipped — redundant with our existing worktree handling). v2.1.119 added `effort.level` and `thinking.enabled` (now displayed inline with the model name). v2.1.145 added `pr.{number,url,review_state}` (displayed as a PR badge in the git segment from plugin v2.3.0) and `workspace.repo.{host,owner,name}` (not used). `session_name` and `workspace.current_dir` are also now documented in the official statusline docs. All other fields remained stable.
+**v2.1.176–v2.1.178** — No statusline JSON changes. v2.1.176 added the `footerLinksRegexes` setting (regex-matched link badges in the footer row — adjacent to but separate from the statusline). v2.1.178 fixed statusline OSC 8 links with custom URI schemes (e.g. `vscode://`) not opening in `claude agents` — relevant only if we ever emit clickable links.
+
+**v2.1.179–v2.1.195** — No statusline JSON changes across this run (auto-mode safety, MCP reliability, background agents, voice, sandbox settings). v2.1.183 fixed fullscreen TUI corruption that could render the statusline mid-screen in Windows Terminal.
+
+**v2.1.196** — **`prompt_id` added to statusline JSON**: UUID of the user prompt currently being processed, matching the `prompt.id` OTel attribute for event correlation. Absent until the first user input. Not useful for display; not adopted.
+
+**v2.1.197** — **Claude Sonnet 5 released** (`claude-sonnet-5`, native 1M context, now the default model in Claude Code). Verified: existing parsing in `src/model.go` handles the single-digit version (outputs "Sonnet 5", `[1m]` suffix stripped); regression tests added in `src/model_test.go`.
+
+**v2.1.198–v2.1.207** — No statusline JSON changes. v2.1.203 added a grey ⏸ footer badge for manual permission mode — permission mode is still NOT exposed in statusline JSON (see closed issue #39420 below). v2.1.198: the built-in Explore agent now inherits the main session's model.
+
+**v2.1.208** — Fixed the context window (and auto-compact indicator) briefly resetting to 200k after CLI auto-updates, which caused a false "100% context used" on long-context sessions. Reliability fix for data we display; no JSON shape change.
+
+**v2.1.209–v2.1.211** — No statusline JSON changes. v2.1.210 fixed `/clear` not resetting the session cost counter — `cost.total_cost_usd` now starts at $0 after `/clear`.
+
+### Statusline JSON field changes in v2.1.29–v2.1.211
+
+v2.1.47 added `workspace.added_dirs`. v2.1.50 introduced the `[1m]` suffix on model IDs for 1M context models (handled in `src/model.go` — we strip `[...]` before version parsing). v2.1.69 added the `worktree` object (name, path, branch, original_cwd, original_branch). v2.1.80 added `rate_limits` with five_hour/seven_day windows. v2.1.97/98 added `workspace.git_worktree` (skipped — redundant with our existing worktree handling). v2.1.119 added `effort.level` and `thinking.enabled` (now displayed inline with the model name). v2.1.145 added `pr.{number,url,review_state}` (displayed as a PR badge in the git segment from plugin v2.3.0) and `workspace.repo.{host,owner,name}` (not used). v2.1.196 added `prompt_id` (not used — correlation UUID, not display data). `session_name` and `workspace.current_dir` are also now documented in the official statusline docs. All other fields remained stable.
 
 ### Statusline-related settings
 
@@ -252,8 +268,9 @@ The OAuth API call to `/api/oauth/usage` has been removed as of plugin v2.1.0. R
 
 These exist in the statusline JSON but we don't leverage them:
 
-- `version` — Claude Code version string (e.g., "2.1.170")
+- `version` — Claude Code version string (e.g., "2.1.211")
 - `session_name` — custom session name from `--name`/`/rename` (absent if unset)
+- `prompt_id` — UUID of the user prompt being processed, matches OTel `prompt.id` (since v2.1.196; absent until first user input)
 - `workspace.current_dir` — same value as `cwd`; preferred alias in official docs
 - `workspace.repo.{host,owner,name}` — repo identity from `origin` remote (since v2.1.145)
 - `pr.url` — open PR URL (we display `pr.number` + `pr.review_state` but not the URL)
@@ -262,10 +279,10 @@ These exist in the statusline JSON but we don't leverage them:
 - `cost.total_api_duration_ms` — API time vs wall time
 - `context_window.remaining_percentage` — pre-calculated remaining % (inverse of `used_percentage`)
 - `transcript_path` — path to conversation transcript file
-- `context_window.total_input_tokens` — cumulative input tokens across session
-- `context_window.total_output_tokens` — cumulative output tokens across session
+- `context_window.total_input_tokens` — tokens currently in the context window (input incl. cache reads/writes), from the most recent API response; cumulative before Claude Code v2.1.132
+- `context_window.total_output_tokens` — output tokens from the most recent API response; cumulative before Claude Code v2.1.132
 - `workspace.added_dirs` — directories added via `/add-dir` (since v2.1.47)
-- `workspace.git_worktree` — path string of active git worktree (since v2.1.97). Evaluated and skipped — redundant with our existing `worktree` object handling and git-detection fallback in `src/git.go`.
+- `workspace.git_worktree` — name of the linked git worktree when cwd is inside one; populated for any `git worktree add` worktree, unlike `worktree.*` which is `--worktree`-sessions-only (since v2.1.97; docs now describe it as a name, absent in the main working tree). Evaluated and skipped — redundant with our existing `worktree` object handling and git-detection fallback in `src/git.go`.
 - `worktree.path` — absolute path to worktree directory
 - `worktree.original_cwd` — directory before entering worktree
 - `worktree.original_branch` — git branch before entering worktree
@@ -273,9 +290,12 @@ These exist in the statusline JSON but we don't leverage them:
 ### Open issues to track
 
 - [#22221](https://github.com/anthropics/claude-code/issues/22221) — Expose rate limits in statusline JSON (partially resolved by v2.1.80 which added `rate_limits`; original request also asked for billing cycle/plan-level data which is not yet available)
-- [#39420](https://github.com/anthropics/claude-code/issues/39420) — Add permission_mode to statusline JSON
-- [#37227](https://github.com/anthropics/claude-code/issues/37227) — Expose per-model rate limits (e.g., separate Sonnet limits) in statusline `rate_limits` field
-- [#33310](https://github.com/anthropics/claude-code/issues/33310) — Expose background task count in statusLine JSON input (stale)
+
+### Closed without resolution (feature still unavailable)
+
+- [#39420](https://github.com/anthropics/claude-code/issues/39420) — Add permission_mode to statusline JSON. Closed March 2026 as duplicate of #31167, which is itself closed as a duplicate. Permission mode is still not in statusline JSON as of v2.1.211 (v2.1.203 added a built-in grey ⏸ footer badge for manual mode instead).
+- [#37227](https://github.com/anthropics/claude-code/issues/37227) — Expose per-model rate limits in statusline `rate_limits`. Closed May 2026 as inactive/not planned.
+- [#33310](https://github.com/anthropics/claude-code/issues/33310) — Expose background task count in statusline JSON. Closed May 2026 as inactive/not planned.
 
 ### Resolved issues
 
