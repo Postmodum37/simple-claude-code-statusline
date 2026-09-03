@@ -48,6 +48,111 @@ func getSemanticColor(pct int) string {
 	}
 }
 
+// severity ranks the semantic colors so two signals can be combined by
+// taking the worse one.
+func severity(color string) int {
+	switch color {
+	case cCrit:
+		return 3
+	case cHigh:
+		return 2
+	case cWarn:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func worseColor(a, b string) string {
+	if severity(b) > severity(a) {
+		return b
+	}
+	return a
+}
+
+// Absolute-token quality bands. Model quality degrades with the number of
+// tokens in context regardless of how big the window is: practitioners put
+// the safe zone at roughly 100–150k tokens and the Claude Code team describes
+// context rot setting in around 300–400k on 1M windows. On a 200k window these
+// bands never override the percent bands; on larger windows they tighten them.
+const (
+	ctxTokensOK   = 150000 // ≤150k: fine
+	ctxTokensWarn = 300000 // ≤300k: getting long
+	ctxTokensHigh = 400000 // ≤400k: rot zone approaching; beyond: expect degraded recall
+)
+
+func absoluteTokenColor(tokens int) string {
+	switch {
+	case tokens <= ctxTokensOK:
+		return cOK
+	case tokens <= ctxTokensWarn:
+		return cWarn
+	case tokens <= ctxTokensHigh:
+		return cHigh
+	default:
+		return cCrit
+	}
+}
+
+// contextColor colors context usage by the worse of the percent-of-window band
+// and the absolute-token band. Identical to getSemanticColor for windows of
+// 200k or less.
+func contextColor(pct, tokens int) string {
+	return worseColor(getSemanticColor(pct), absoluteTokenColor(tokens))
+}
+
+// Rate-limit window lengths in seconds.
+const (
+	fiveHourWindowSecs = 5 * 3600
+	sevenDayWindowSecs = 7 * 24 * 3600
+)
+
+// usageColor colors a rate-limit window by pace rather than raw fill: 80% used
+// with 20 minutes left is fine, 40% used with 4.5h left will run out. It
+// projects end-of-window usage from the fraction of the window elapsed.
+// Floors keep a nearly exhausted window visibly urgent regardless of pace, and
+// a cap keeps early-window noise from screaming while usage is still low.
+// Falls back to the raw-fill bands when the reset time is unknown.
+func usageColor(usedPct int, windowSecs int, resetsAt, now time.Time) string {
+	if resetsAt.IsZero() || windowSecs <= 0 {
+		return getSemanticColor(usedPct)
+	}
+	remaining := resetsAt.Sub(now).Seconds()
+	elapsed := float64(windowSecs) - remaining
+	minElapsed := float64(windowSecs) * 0.05
+	if elapsed < minElapsed {
+		elapsed = minElapsed
+	}
+	if elapsed > float64(windowSecs) {
+		elapsed = float64(windowSecs)
+	}
+	projected := float64(usedPct) * float64(windowSecs) / elapsed
+
+	var color string
+	switch {
+	case projected < 85:
+		color = cOK
+	case projected < 100:
+		color = cWarn
+	case projected < 120:
+		color = cHigh
+	default:
+		color = cCrit
+	}
+
+	// Cap: with under 20% used there is plenty of headroom whatever the pace.
+	if usedPct < 20 && severity(color) > severity(cWarn) {
+		color = cWarn
+	}
+	// Floors: a nearly empty window blocks you no matter the pace.
+	if usedPct >= 90 {
+		color = cCrit
+	} else if usedPct >= 75 {
+		color = worseColor(color, cHigh)
+	}
+	return color
+}
+
 // effortColor returns the color for an effort level. "auto" is a mode that
 // dynamically selects effort, so it gets the accent color rather than a slot
 // on the cost gradient. Unknown levels fall back to muted for forward
@@ -73,8 +178,9 @@ func effortColor(level string) string {
 
 // --- Progress bar ---
 
-// buildProgressBar builds a 20-character progress bar with optional compact marker.
-func buildProgressBar(pct int, compactEnabled bool, compactThresholdPct int) string {
+// buildProgressBar builds a 20-character progress bar in the given color with
+// an optional compact marker.
+func buildProgressBar(pct int, color string, compactEnabled bool, compactThresholdPct int) string {
 	const barWidth = 20
 
 	filled := pct * barWidth / 100
@@ -92,8 +198,6 @@ func buildProgressBar(pct int, compactEnabled bool, compactThresholdPct int) str
 	if markerPos > barWidth-1 {
 		markerPos = barWidth - 1
 	}
-
-	color := getSemanticColor(pct)
 
 	var b strings.Builder
 	for i := 0; i < barWidth; i++ {
@@ -129,12 +233,15 @@ func Render(w io.Writer, stdin *StdinData, git *GitStatus, usage *UsageData, com
 	fmt.Fprintf(w, "%s\n%s", row1, row2)
 }
 
-// buildRow1 constructs: {model}[*][•{effort}] [{agent}] │ {dir} │ {branch} [wt:{worktree}] {git_status} [#PR {state}] │ {+N/-M}
+// buildRow1 constructs: {model}[⚡][*][•{effort}] [{agent}] │ {dir} │ {branch} [wt:{worktree}] {git_status} [#PR {state}] │ {+N/-M}
 func buildRow1(stdin *StdinData, git *GitStatus) string {
 	var parts []string
 
 	// Model + thinking + effort + agent
 	modelPart := cWhite + ModelDisplayName(stdin.Model.ID, stdin.Model.DisplayName) + cReset
+	if stdin.FastMode {
+		modelPart += cWarn + "⚡" + cReset
+	}
 	if stdin.Thinking != nil && stdin.Thinking.Enabled {
 		modelPart += cMuted + "*" + cReset
 	}
@@ -207,12 +314,17 @@ func buildRow1(stdin *StdinData, git *GitStatus) string {
 	return strings.Join(parts, sep())
 }
 
-// prBadge formats the open-PR badge, e.g. "#1234 ⏳". Returns "" when no PR.
+// prBadge formats the open-PR badge, e.g. "#1234 ⏳" (or "!1234 ⏳" for a
+// GitLab merge request, mirroring Claude Code's own footer). Returns "" when no PR.
 func prBadge(pr *PRInfo) string {
 	if pr == nil || pr.Number <= 0 {
 		return ""
 	}
-	badge := cMuted + "#" + fmt.Sprintf("%d", pr.Number) + cReset
+	prefix := "#"
+	if pr.Kind == "mr" {
+		prefix = "!"
+	}
+	badge := cMuted + prefix + fmt.Sprintf("%d", pr.Number) + cReset
 	switch pr.ReviewState {
 	case "approved":
 		badge += " " + cGitAdd + "✓" + cReset
@@ -251,9 +363,18 @@ func buildRow2(stdin *StdinData, usage *UsageData, compact CompactInfo) string {
 	return strings.Join(parts, sep())
 }
 
+// contextTokens returns the number of tokens occupying the context window,
+// using the same definition Claude Code uses for used_percentage and
+// total_input_tokens: input + cache creation + cache read. Output tokens of
+// the last response are excluded so the count agrees with the percentage.
+func contextTokens(u *CurrentUsage) int {
+	return u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
+}
+
 // buildContextSection builds the context bar + tokens + indicators.
 func buildContextSection(stdin *StdinData, compact CompactInfo) string {
 	var pct int
+	var tokens int
 	var tokensStr string
 	hasData := false
 
@@ -267,39 +388,33 @@ func buildContextSection(stdin *StdinData, compact CompactInfo) string {
 
 		if stdin.ContextWindow.CurrentUsage != nil {
 			// Use actual token counts for display
-			total := stdin.ContextWindow.CurrentUsage.InputTokens +
-				stdin.ContextWindow.CurrentUsage.OutputTokens +
-				stdin.ContextWindow.CurrentUsage.CacheCreationInputTokens +
-				stdin.ContextWindow.CurrentUsage.CacheReadInputTokens
-			tokensStr = FormatTokens(total)
+			tokens = contextTokens(stdin.ContextWindow.CurrentUsage)
 		} else {
 			// Estimate tokens from percentage
-			estimated := pct * windowSize / 100
-			tokensStr = FormatTokens(estimated)
+			tokens = pct * windowSize / 100
 		}
+		tokensStr = FormatTokens(tokens)
 	} else if stdin.ContextWindow.CurrentUsage != nil {
 		// Priority 2: calculate from current_usage
-		total := stdin.ContextWindow.CurrentUsage.InputTokens +
-			stdin.ContextWindow.CurrentUsage.OutputTokens +
-			stdin.ContextWindow.CurrentUsage.CacheCreationInputTokens +
-			stdin.ContextWindow.CurrentUsage.CacheReadInputTokens
+		tokens = contextTokens(stdin.ContextWindow.CurrentUsage)
 		hasData = true
-		tokensStr = FormatTokens(total)
+		tokensStr = FormatTokens(tokens)
 
 		if windowSize > 0 {
-			pct = total * 100 / windowSize
+			pct = tokens * 100 / windowSize
 		}
 	}
 
 	var b strings.Builder
 
 	if hasData {
+		color := contextColor(pct, tokens)
+
 		// Progress bar
-		b.WriteString(buildProgressBar(pct, compact.Enabled, compact.ThresholdPct))
+		b.WriteString(buildProgressBar(pct, color, compact.Enabled, compact.ThresholdPct))
 		b.WriteString(" ")
 
 		// Tokens display
-		color := getSemanticColor(pct)
 		b.WriteString(color)
 		b.WriteString(tokensStr)
 		b.WriteString(cReset)
@@ -309,7 +424,7 @@ func buildContextSection(stdin *StdinData, compact CompactInfo) string {
 		b.WriteString(cReset)
 	} else {
 		// No data — show dash
-		b.WriteString(buildProgressBar(0, compact.Enabled, compact.ThresholdPct))
+		b.WriteString(buildProgressBar(0, cOK, compact.Enabled, compact.ThresholdPct))
 		b.WriteString(" ")
 		b.WriteString(cMuted)
 		b.WriteString("\u2014") // em dash
@@ -347,26 +462,35 @@ func buildUsageSection(usage *UsageData) string {
 		return cMuted + "5h:\u2014" + cReset + sep() + cMuted + "7d:\u2014" + cReset
 	}
 
+	now := time.Now()
 	var parts []string
-	parts = append(parts, formatUsageWindow("5h", usage.FiveHour))
-	parts = append(parts, formatUsageWindow("7d", usage.SevenDay))
+	parts = append(parts, formatUsageWindow("5h", fiveHourWindowSecs, usage.FiveHour, now))
+	parts = append(parts, formatUsageWindow("7d", sevenDayWindowSecs, usage.SevenDay, now))
 
 	return strings.Join(parts, sep())
 }
 
-// formatUsageWindow formats a single usage window like "5h:42% (2h)".
-func formatUsageWindow(label string, window *UsageWindow) string {
+// formatUsageWindow formats a single usage window like "5h:42% (2h)", colored
+// by pace (see usageColor).
+func formatUsageWindow(label string, windowSecs int, window *UsageWindow, now time.Time) string {
 	if window == nil {
 		return cMuted + label + ":\u2014" + cReset
 	}
 
 	pct := int(window.Utilization)
-	color := getSemanticColor(pct)
+
+	var resetsAt time.Time
+	if window.ResetsAt != "" {
+		if t, err := time.Parse(time.RFC3339, window.ResetsAt); err == nil {
+			resetsAt = t
+		}
+	}
+	color := usageColor(pct, windowSecs, resetsAt, now)
 
 	result := color + fmt.Sprintf("%s:%d%%", label, pct) + cReset
 
-	if window.ResetsAt != "" {
-		resetStr := FormatResetTime(window.ResetsAt, time.Now())
+	if !resetsAt.IsZero() {
+		resetStr := FormatResetTime(window.ResetsAt, now)
 		result += " " + cMuted + "(" + resetStr + ")" + cReset
 	}
 

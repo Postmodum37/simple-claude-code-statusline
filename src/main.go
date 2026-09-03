@@ -1,9 +1,6 @@
 package main
 
-import (
-	"os"
-	"path/filepath"
-)
+import "os"
 
 func main() {
 	stdin, err := ParseStdin(os.Stdin)
@@ -17,10 +14,10 @@ func main() {
 	}
 
 	// Gather data
-	claudeJSONPath := filepath.Join(os.Getenv("HOME"), ".claude.json")
 	usageData := GetUsageData(stdin)
 	gitData := GetGitStatus(stdin.Workspace.ProjectDir, cacheDir)
-	compactEnabled, compactPct := GetCompactThreshold(stdin.ContextWindow.ContextWindowSize, claudeJSONPath)
+	compactCfg := DefaultCompactConfig(os.Getenv("HOME"), stdin.Workspace.ProjectDir, stdin.Model.ID)
+	compactEnabled, compactPct := GetCompactThreshold(stdin.ContextWindow.ContextWindowSize, compactCfg)
 
 	// Render to stdout
 	Render(os.Stdout, stdin, gitData, usageData, CompactInfo{

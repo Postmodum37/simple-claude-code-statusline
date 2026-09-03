@@ -8,32 +8,49 @@ A minimal, hackable two-line statusline for Claude Code.
 
 ## Features
 
-**Line 1:** Model [*thinking] [•effort] [agent] | Directory | Git branch + status + PR badge | Session lines changed
+**Line 1:** Model [⚡fast] [*thinking] [•effort] [agent] | Directory | Git branch + status + PR badge | Session lines changed
 **Line 2:** Context bar | 5h rate limit | 7d rate limit | Cost | Duration
 
 - Tokyo Night color scheme
 - Context usage with color-coded progress bar
 - Rate limit tracking with time until reset
 - Git branch with added/modified/deleted counts and ahead/behind tracking
-- Open PR badge with review state (`#1234 ⏳`) when Claude Code detects a PR for the current branch
+- Open PR badge with review state (`#1234 ⏳`, or `!1234` for GitLab merge requests) when Claude Code detects a PR for the current branch
 - Git worktree support with `[wt:name]` indicator
-- Reasoning effort level (`•high`) and extended-thinking marker (`*`)
+- Reasoning effort level (`•high`), extended-thinking marker (`*`), and fast-mode marker (`⚡`)
 - Agent name display when using `--agent` flag
 - Session lines changed (cumulative +added/-removed)
 - Session cost tracking ($X.XX)
-- Auto-compact indicator (↻) when enabled
+- Auto-compact indicator (↻) with the exact threshold Claude Code will compact at, honoring `autoCompactEnabled`/`autoCompactWindow` in `settings.json` and the `CLAUDE_CODE_AUTO_COMPACT_WINDOW`/`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`/`DISABLE_AUTO_COMPACT` env vars
 - `>200k` token threshold indicator (fast mode pricing doubles past 200k)
 - Cross-platform (macOS and Linux)
 - Cross-compiled Go binaries — zero runtime dependencies
 
 ### Context Usage Colors
 
-| Usage | Color | Meaning |
-|-------|-------|---------|
-| 0-50% | Green | Plenty of context remaining |
-| 51-75% | Yellow | Getting full |
-| 76-90% | Orange | Consider summarizing |
-| 91%+ | Red | Near limit |
+The bar, token count, and percentage are colored by the **worse** of two signals: how full the window is, and how many tokens are in it. Model quality degrades with absolute context length regardless of window size (practitioners put the safe zone around 100–150k tokens; the Claude Code team describes context rot setting in around 300–400k), so on a 1M window the color turns before the bar looks full.
+
+| % of window | Absolute tokens | Color | Meaning |
+|-------------|-----------------|-------|---------|
+| 0-50% | ≤150k | Green | Plenty of headroom |
+| 51-75% | ≤300k | Yellow | Getting long — consider `/clear` when switching tasks |
+| 76-90% | ≤400k | Orange | Quality likely degrading; `/compact` or `/clear` |
+| 91%+ | >400k | Red | Expect degraded recall / near the limit |
+
+On a 200k window the absolute bands never change the color (150k is 75%), so the result is exactly the percent bands. The `(↻83%)` auto-compact marker is independent of color: it shows where Claude Code will mechanically compact, computed the same way Claude Code does (window − 20k output reserve − 13k buffer, so 83% on 200k and 96% on 1M).
+
+### Rate Limit Colors
+
+The 5h and 7d percentages are colored by **pace**, not raw fill: 80% used with 20 minutes left is fine, 40% used with 4.5 hours left will run out. The plugin projects end-of-window usage from the fraction of the window that has elapsed (derived from `resets_at`):
+
+| Projected end-of-window usage | Color |
+|-------------------------------|-------|
+| < 85% | Green |
+| 85–99% | Yellow |
+| 100–119% | Orange |
+| ≥ 120% | Red |
+
+Two guards: below 20% used the color is capped at yellow (early-window projections are noisy), and at 75%+ / 90%+ used the color is at least orange / red regardless of pace, because a nearly empty window blocks you either way. Without a reset time the raw-fill bands above are used.
 
 ### Git Features
 
@@ -41,7 +58,7 @@ A minimal, hackable two-line statusline for Claude Code.
 
 - **Branch name** with file status counts (✚added/●modified/✖deleted)
 - **Ahead/behind** tracking: `↑2` commits ahead, `↓1` behind upstream
-- **PR badge**: `#1234 ⏳` for the open PR on the current branch — ✓ approved, ⏳ pending, ✗ changes requested, ◌ draft (Claude Code v2.1.145+)
+- **PR badge**: `#1234 ⏳` for the open PR on the current branch — ✓ approved, ⏳ pending, ✗ changes requested, ◌ draft (Claude Code v2.1.145+). GitLab merge requests render as `!1234`, matching Claude Code's own footer.
 - **Worktree indicator**: `[wt:feature-name]` when in a linked worktree
 - **Session lines changed**: `+44/-14` cumulative lines added/removed this session
 
@@ -49,7 +66,7 @@ A minimal, hackable two-line statusline for Claude Code.
 
 ![Sonnet model with green context bar](screenshot-sonnet.png)
 
-Shows abbreviated model names: Fable 5, Opus 4.8, Sonnet 4.6, Haiku, etc.
+Shows abbreviated model names: Mythos 5.1, Fable 5.1, Opus 5, Sonnet 5, Haiku 4.5, etc. A yellow `⚡` follows the name while fast mode is on.
 
 ## Requirements
 
@@ -207,9 +224,10 @@ Claude Code pipes JSON to statusline commands via stdin. Here's the complete sch
 | `context_window.used_percentage` | Yes | Percentage of context used (0-100) |
 | `context_window.remaining_percentage` | — | Percentage remaining (inverse of used) |
 | `context_window.context_window_size` | Yes | Maximum context window size in tokens |
-| `context_window.current_usage.*` | Yes | Per-API-call token breakdown by type |
+| `context_window.current_usage.*` | Yes | Token breakdown for the current context; displayed count is input + cache creation + cache read, the same sum Claude Code uses for `used_percentage` |
 | `context_window.total_input_tokens` / `total_output_tokens` | — | Tokens currently in the context window, from the most recent API response (cumulative before Claude Code v2.1.132) |
 | `exceeds_200k_tokens` | Yes | Whether token count exceeds 200k (fast mode pricing threshold) |
+| `fast_mode` | Yes | Whether fast mode (`/fast`) is on — shown as `⚡` after the model name |
 | `cost.total_cost_usd` | Yes | Session cost in USD |
 | `cost.total_duration_ms` | Yes | Session wall-clock time |
 | `cost.total_api_duration_ms` | — | Time spent waiting for API responses |
@@ -219,7 +237,11 @@ Claude Code pipes JSON to statusline commands via stdin. Here's the complete sch
 | `thinking.enabled` | Yes | Whether extended thinking is on (v2.1.119+) |
 | `agent.name` | Yes | Agent name when using `--agent` flag |
 | `pr.number` / `pr.review_state` | Yes | Open PR for current branch + review state (v2.1.145+) |
+| `pr.kind` | Yes | `mr` for GitLab merge requests (rendered as `!N`); absent for GitHub PRs |
 | `pr.url` | — | Open PR URL |
+| `rate_limits.spend_limit.*` | — | Overage spend-limit window (gateway accounts only) |
+| `prompt_cache.*` | — | Prompt-cache telemetry: `warm`, `ttl`, `expires_at`, `hit_ratio`, … |
+| `remote.session_id` | — | Present in Remote Control sessions |
 | `workspace.repo.{host,owner,name}` | — | Repo identity from `origin` remote (v2.1.145+) |
 | `workspace.added_dirs` | — | Directories added via `/add-dir` |
 | `workspace.git_worktree` | — | Linked git worktree name (we use `worktree` + git detection instead) |
@@ -233,7 +255,7 @@ Claude Code pipes JSON to statusline commands via stdin. Here's the complete sch
 | `vim.mode` | — | Vim mode (NORMAL/INSERT/VISUAL/VISUAL LINE) when vim mode is enabled |
 | `output_style.name` | — | Current output style name |
 
-**Fields that may be absent:** `vim`, `agent`, `worktree`, `effort`, `thinking`, `pr` (only while an open PR is detected; `review_state` may be independently absent), `session_name`, `prompt_id` (absent until the first user input), `workspace.repo`, `rate_limits` (Pro/Max only, after first API response).
+**Fields that may be absent:** `vim`, `agent`, `worktree`, `effort`, `pr` (only while an open PR is detected; `review_state` and `kind` may be independently absent), `prompt_cache` (absent until the first API request), `remote`, `session_name`, `prompt_id` (absent until the first user input), `workspace.repo`, `rate_limits` (Pro/Max only, after first API response).
 
 **Fields that may be null:** `context_window.used_percentage`, `context_window.current_usage` (before first API call).
 

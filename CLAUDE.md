@@ -34,12 +34,16 @@ Claude Code pipes JSON to the binary via stdin containing:
 - `rate_limits.{five_hour,seven_day}` - Rate limit windows (since v2.1.80)
 - `effort.level` - Reasoning effort: `low|medium|high|xhigh|max` (since v2.1.119; docs no longer list `auto` — ultracode reports as `xhigh`)
 - `thinking.enabled` - Whether extended thinking is on (since v2.1.119)
-- `pr.{number,url,review_state}` - Open PR for the current branch (since v2.1.145; absent until a PR is found)
+- `pr.{number,url,review_state,kind}` - Open PR for the current branch (since v2.1.145; absent until a PR is found; `kind: "mr"` for GitLab merge requests)
+- `fast_mode` - Whether fast mode is on (boolean, always present in v2.1.259)
+- `prompt_cache.*` - Prompt-cache telemetry (`warm`, `ttl`, `expires_at`, `hit_ratio`, …; absent before the first request) — not displayed
+- `rate_limits.spend_limit` - Overage spend-limit window, gateway accounts only — not displayed
+- `remote.session_id` - Present in Remote Control sessions — not displayed
 - `workspace.repo.{host,owner,name}` - Repo identity from the `origin` remote (since v2.1.145)
 - `exceeds_200k_tokens` - Whether the most recent API response exceeded 200k tokens
 
 The binary outputs two lines of ANSI-escaped text:
-1. Model [thinking-marker] [•effort] [agent] | Directory | Git branch + status + PR badge | Session lines changed
+1. Model [⚡fast] [thinking-marker] [•effort] [agent] | Directory | Git branch + status + PR badge | Session lines changed
 2. Context bar | 5h rate limit | 7d rate limit | Cost | Duration
 
 ## Building
@@ -93,7 +97,8 @@ Do NOT use termshot/vhs — they render fonts incorrectly. The `workspace.projec
 
 External commands and files used:
 - `git` - Repository status (with `--no-optional-locks` to avoid conflicts)
-- `~/.claude.json` - Auto-compact setting detection
+- `~/.claude/settings.json`, `<project>/.claude/settings.json`, `<project>/.claude/settings.local.json`, managed-settings.json - `autoCompactEnabled` and `autoCompactWindow` (highest-precedence file wins)
+- `~/.claude.json` - Legacy `autoCompactEnabled` fallback and the server-provided `autoCompactWindowsCache` per-model window table
 
 ## Key Implementation Notes
 
@@ -101,12 +106,14 @@ External commands and files used:
 - Go source is in `src/` with one package (`main`): stdin parsing, model ID parsing, formatting, git status, rate-limit data, auto-compact detection, and ANSI rendering
 - Caches to `${CLAUDE_CODE_TMPDIR:-/tmp}/claude-*` (git: 5s TTL). Atomic writes via tmpfile + rename.
 - Colors use Tokyo Night palette as constants in `src/render.go`. Effort levels use a separate semantic gradient via `effortColor()`: low=muted, medium=white, high=warn, xhigh=high, max=crit, auto=accent (auto is a mode, not a gradient slot; official docs no longer list `auto` as an `effort.level` value — kept as harmless legacy handling).
-- Thinking-on shows as a muted `*` after the model name; effort shows as `•{level}` after the `*` (when present), both before the agent bracket.
+- Fast mode (`fast_mode: true`) shows as a yellow `⚡` immediately after the model name; thinking-on shows as a muted `*` after that; effort shows as `•{level}` after the `*` (when present), all before the agent bracket.
+- Context color (`contextColor()` in `src/render.go`) is the worse of the percent band (`getSemanticColor()`: ≤50/≤75/≤90) and an absolute-token band (≤150k/≤300k/≤400k). On ≤200k windows this equals the percent band; on 1M windows it turns yellow at 150k, orange at 300k, red at 400k. Rationale: quality degrades with absolute context length (Pocock ~100–150k safe zone; Claude Code team's Thariq Shihipar: rot around 300–400k on 1M). The auto-compact marker is separate and purely mechanical.
+- Rate-limit color (`usageColor()`) is pace-based: projected end-of-window usage = used% × window / elapsed, where elapsed is derived from `resets_at` (5h = 18000s, 7d = 604800s) and clamped to ≥5% of the window. Bands: <85 ok, <100 warn, <120 high, else crit; capped at warn below 20% used; floored at high/crit at 75%/90% used. Falls back to percent bands without a reset time.
 - Lines changed shows session-cumulative totals from `cost.total_lines_added`/`cost.total_lines_removed`
-- Auto-compact indicator `(↻)` shown when auto-compact is enabled
+- Auto-compact indicator `(↻N%)` shown when auto-compact is enabled. `GetCompactThreshold()` in `src/compact.go` replicates Claude Code's resolution (verified against the v2.1.259 binary): kill switches `DISABLE_AUTO_COMPACT`/`DISABLE_COMPACT`; `autoCompactEnabled` from settings.json (managed > local > project > user) then legacy `~/.claude.json`; window = min(model window, `CLAUDE_CODE_AUTO_COMPACT_WINDOW` (clamped 100k–1M) → `autoCompactWindow` setting (set by `/autocompact` or `--autocompact`) → `autoCompactWindowsCache[model]` in `~/.claude.json`); effective = window − min(`CLAUDE_CODE_MAX_OUTPUT_TOKENS`, 20000); threshold = effective − 13000, lowered (never raised) by `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`. Not replicated: server-side statsig overrides and the `d1()`/experiment 200k caps for some 1M models — the JSON exposes no effective-window field.
 - `>200k` indicator driven by the native `exceeds_200k_tokens` boolean from stdin (fast mode pricing threshold)
-- PR badge (`prBadge()` in `src/render.go`) renders `#<number>` plus a review-state glyph (✓ approved / ⏳ pending / ✗ changes_requested / ◌ draft) inside the git segment; requires git info to be present
-- Context display uses `used_percentage` as single source of truth for bar/color/percentage. `current_usage.*` drives absolute token count display only. (Note: prior to Claude Code v2.1.132 `current_usage` reported cumulative session totals — that bug is now fixed and the field is trustworthy.)
+- PR badge (`prBadge()` in `src/render.go`) renders `#<number>` (or `!<number>` when `pr.kind == "mr"`, matching Claude Code's own GitLab footer) plus a review-state glyph (✓ approved / ⏳ pending / ✗ changes_requested / ◌ draft) inside the git segment; requires git info to be present
+- Context display uses `used_percentage` as single source of truth for bar/percentage. `current_usage.*` drives the absolute token count, summed as input + cache_creation + cache_read (output tokens excluded) — this is exactly the sum Claude Code uses for `used_percentage` and `total_input_tokens` (verified in the v2.1.259 binary), so count and percentage agree. (Note: prior to Claude Code v2.1.132 `current_usage` reported cumulative session totals — that bug is now fixed and the field is trustworthy.)
 
 ## Plugin Development
 
@@ -136,7 +143,7 @@ Do NOT bump version for:
 
 Track which Claude Code versions have been reviewed for statusline-relevant changes.
 
-### Last reviewed: v2.1.211 (July 16, 2026)
+### Last reviewed: v2.1.259 (September 3, 2026)
 
 **v2.1.29–v2.1.31** — No statusline-impacting changes. v2.1.31 reduced terminal layout jitter during spinner transitions, which may improve statusline rendering stability.
 
@@ -252,13 +259,54 @@ Track which Claude Code versions have been reviewed for statusline-relevant chan
 
 **v2.1.209–v2.1.211** — No statusline JSON changes. v2.1.210 fixed `/clear` not resetting the session cost counter — `cost.total_cost_usd` now starts at $0 after `/clear`.
 
-### Statusline JSON field changes in v2.1.29–v2.1.211
+**v2.1.212–v2.1.215** — No statusline JSON changes. v2.1.214 added reasoning effort to the separate `subagentStatusLine` payload (agent-panel hook, not our stdin).
 
-v2.1.47 added `workspace.added_dirs`. v2.1.50 introduced the `[1m]` suffix on model IDs for 1M context models (handled in `src/model.go` — we strip `[...]` before version parsing). v2.1.69 added the `worktree` object (name, path, branch, original_cwd, original_branch). v2.1.80 added `rate_limits` with five_hour/seven_day windows. v2.1.97/98 added `workspace.git_worktree` (skipped — redundant with our existing worktree handling). v2.1.119 added `effort.level` and `thinking.enabled` (now displayed inline with the model name). v2.1.145 added `pr.{number,url,review_state}` (displayed as a PR badge in the git segment from plugin v2.3.0) and `workspace.repo.{host,owner,name}` (not used). v2.1.196 added `prompt_id` (not used — correlation UUID, not display data). `session_name` and `workspace.current_dir` are also now documented in the official statusline docs. All other fields remained stable.
+**v2.1.216** — Fixed the statusline running twice on resume. No JSON changes.
+
+**v2.1.217–v2.1.218** — No statusline JSON changes. v2.1.217 fixed auto-compact never triggering for Opus 4.8 on Bedrock; footer PR badge links now clickable without hyperlink detection (`FORCE_HYPERLINK=0` opts out).
+
+**v2.1.219** — **Claude Opus 5 released** (`claude-opus-5`, now the default Opus, 1M context, fast mode at $10/$50 per Mtok). Opus 4.7 removed from fast mode; `/fast` applies to Opus 5 and Opus 4.8. Parser outputs "Opus 5" (regression test added in plugin v2.4.0).
+
+**v2.1.220–v2.1.222** — No statusline JSON changes. v2.1.221 introduced **`/autocompact <tokens|auto>` and `--autocompact`**, which write the `autoCompactWindow` setting (100k–1M) — this moves the auto-compact marker; consumed by `src/compact.go` from plugin v2.4.0. v2.1.221 also fixed the thinking toggle having no effect mid-session (`thinking.enabled` reliable after toggles). v2.1.222 fixed sessions not linking to PRs created after push.
+
+**v2.1.223** — **Auto-compact window behavior change.** `CLAUDE_CODE_DISABLE_1M_CONTEXT=1` now holds every native-1M model to 200K via auto-compaction; unrecognized model IDs are held within the assumed window (`CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1` restores old behavior). Neither is visible in statusline JSON, so the marker can be off for those users.
+
+**v2.1.224–v2.1.233** — No statusline JSON changes. v2.1.225 added gateway spend-limit warnings (precursor to `rate_limits.spend_limit`). v2.1.229: "prompt is too long" errors explain why auto-compaction couldn't recover. v2.1.233 first names **Mythos 5** as a model family (todo tools removed on Opus 4.8/Sonnet 5/Fable 5/Mythos 5 and newer). The v2.1.259 binary contains `claude-mythos-5` and `claude-mythos-5-1` IDs with display names "Mythos 5"/"Mythos 5.1" — family parsing for "mythos" added in plugin v2.4.0.
+
+**v2.1.234** — **`pr.kind` added to statusline JSON**: GitLab merge requests (GitLab remote + authenticated `glab`) now populate `pr` with `kind: "mr"` (absent for GitHub PRs); `review_state` is `approved` when mergeable, `pending` otherwise, `draft` for drafts (`changes_requested` never occurs for MRs). Claude Code's footer renders MRs as `!N`; the plugin does the same from v2.4.0. Also: Remote Control effort picks apply to terminal sessions, so `effort.level` can change from a phone.
+
+**v2.1.235–v2.1.238** — No statusline JSON changes. v2.1.237 added the built-in "Concise" output style (new `output_style.name` value). v2.1.236 added `ANTHROPIC_DEFAULT_MODEL`.
+
+**v2.1.239** — `cost.total_cost_usd` (and `/cost`) now includes the 1.1× US-only-inference premium for data-residency workspaces. No JSON shape change.
+
+**v2.1.240–v2.1.243** — v2.1.243: **`modelPricing` managed setting** — `cost.total_cost_usd` may reflect contracted per-model rates instead of list price (requires v2.1.242). **Fixed statusline `rate_limits` fields showing a window's pre-reset usage after the window reset while idle.** Also `promptCacheTtl` settings, `/tasks` shows model + effort per subagent.
+
+**v2.1.245–v2.1.246** — v2.1.246 fixed the statusline's cost and duration resetting to zero after visiting the agents view. No JSON changes.
+
+**v2.1.247** — **Sonnet 5's default auto-compact window changed to its full 1M context**, so 1M sessions compact at ~967K (was ~934K). 967K = 1M − 20k reserve − 13k buffer, which independently confirms our formula.
+
+**v2.1.248–v2.1.250** — No statusline JSON changes. v2.1.248: footer PR badge polls GitHub less often; `[1m]` suffixes render literally in `/model`.
+
+**v2.1.251** — **Two new statusline JSON fields:** `rate_limits.spend_limit.{used_percentage,resets_at}` (Claude apps gateway spend limits only; `used_percentage` may exceed 100) and a `prompt_cache` object (`warm`, `caching_observed`, `ttl` "5m"|"1h", `expires_at`, `requests`, `misses`, `expected_rebuilds`, `hit_ratio`, `cache_write_tokens`, `miss_recache_tokens`, `last_miss_at`, `recache_tokens_if_cold`; main conversation only, absent until the first API response). Parsed but not displayed. Also `PreModelSwitch`/`PostModelSwitch` hooks; `/effort` saves a default per model; Opus 5 with thinking off sends effort as `high` when xhigh/max was chosen; project-level `env` can no longer set `CLAUDE_CODE_TMPDIR` (our cache-dir env var).
+
+**v2.1.252** — No statusline changes.
+
+**v2.1.257** — **Claude Fable 5.1 released** (`claude-fable-5-1`, now the default Fable model, 1M context; the `fable` alias resolves to 5.1 from v2.1.255 and saved `claude-fable-5[1m]` settings are rewritten to the alias). Parser outputs "Fable 5.1" (regression test added in plugin v2.4.0). Also `s` in `/effort` for session-only effort; `--effort` lifts a new model's default-effort hold for the session only.
+
+**v2.1.258–v2.1.259** — No statusline JSON changes. v2.1.259 fixed concurrent sessions silently reverting each other's `~/.claude.json` changes (we read `~/.claude.json` for legacy `autoCompactEnabled` and `autoCompactWindowsCache`) and fixed `CLAUDE_CODE_MAX_CONTEXT_TOKENS` being ignored for Vertex-style `@YYYYMMDD` IDs.
+
+**Binary-verified in v2.1.259 (not in changelog):** the statusline JSON builder also emits a top-level **`fast_mode`** boolean (documented, undated; displayed as `⚡` from plugin v2.4.0) and `remote: {session_id}` in Remote Control sessions. `thinking` is always present; `effort` only when the model supports the effort parameter. `used_percentage` = round((input + cache_creation + cache_read) / context_window_size × 100), clamped, excluding output tokens. Claude Code's own context indicator warns 20k tokens before the compact threshold and blocks 3k tokens before the effective window. Skipped/unpublished version numbers in this range: 2.1.213, 2.1.230, 2.1.242, 2.1.244, 2.1.249, 2.1.253–2.1.256.
+
+### Statusline JSON field changes in v2.1.29–v2.1.259
+
+v2.1.47 added `workspace.added_dirs`. v2.1.50 introduced the `[1m]` suffix on model IDs for 1M context models (handled in `src/model.go` — we strip `[...]` before version parsing). v2.1.69 added the `worktree` object (name, path, branch, original_cwd, original_branch). v2.1.80 added `rate_limits` with five_hour/seven_day windows. v2.1.97/98 added `workspace.git_worktree` (skipped — redundant with our existing worktree handling). v2.1.119 added `effort.level` and `thinking.enabled` (now displayed inline with the model name). v2.1.145 added `pr.{number,url,review_state}` (displayed as a PR badge in the git segment from plugin v2.3.0) and `workspace.repo.{host,owner,name}` (not used). v2.1.196 added `prompt_id` (not used — correlation UUID, not display data). v2.1.234 added `pr.kind` (`"mr"`, rendered as `!N` from plugin v2.4.0). v2.1.251 added `rate_limits.spend_limit` and `prompt_cache` (not displayed). `fast_mode` (boolean) is documented and emitted by v2.1.259 (displayed as `⚡` from plugin v2.4.0). Rate-limit windows are now dropped from the JSON once their `resets_at` passes, so an absent window no longer implies an old Claude Code version. `session_name` and `workspace.current_dir` are also now documented in the official statusline docs. All other fields remained stable.
 
 ### Statusline-related settings
 
-- `statusLineRefreshInterval` (introduced v2.1.97) — milliseconds between idle re-invocations of the statusline command. Useful when displaying time-elapsed metrics that should update without user activity. Configured in `~/.claude/settings.json`. We don't set this ourselves; users who want idle refresh can opt in.
+- `statusLine.refreshInterval` (introduced v2.1.97) — **seconds** (min 1) between idle re-invocations of the statusline command, set inside the `statusLine` object in `~/.claude/settings.json` (verified in the v2.1.259 binary: `Math.max(1, refreshInterval) * 1000`). Useful when displaying time-elapsed metrics that should update without user activity. We don't set this ourselves; users who want idle refresh can opt in. Independently of this, Claude Code re-runs the script when a rate-limit window reaches `resets_at`, when a warm prompt cache reaches `expires_at`, on permission-mode change, and on vim toggle (300ms debounce, in-flight script cancelled).
+- `statusLine.padding` — left padding in characters (default 0).
+- `statusLine.hideVimModeIndicator` — suppresses the built-in `-- INSERT --` when the script renders `vim.mode` itself.
+- The statusline command receives `COLUMNS` and `LINES` env vars (since v2.1.153); `tput cols` does not work because output is captured.
 
 ### Usage API changes
 
@@ -273,8 +321,11 @@ These exist in the statusline JSON but we don't leverage them:
 - `prompt_id` — UUID of the user prompt being processed, matches OTel `prompt.id` (since v2.1.196; absent until first user input)
 - `workspace.current_dir` — same value as `cwd`; preferred alias in official docs
 - `workspace.repo.{host,owner,name}` — repo identity from `origin` remote (since v2.1.145)
-- `pr.url` — open PR URL (we display `pr.number` + `pr.review_state` but not the URL)
-- `vim.mode` — current vim mode (NORMAL/INSERT)
+- `vim.mode` — current vim mode (NORMAL/INSERT/VISUAL/VISUAL LINE)
+- `rate_limits.spend_limit.{used_percentage,resets_at}` — gateway spend-limit window (since v2.1.251; `used_percentage` may exceed 100)
+- `prompt_cache.*` — per-session prompt-cache telemetry (since v2.1.251; absent until the first API response). `warm`/`hit_ratio` could drive a cache indicator
+- `remote.session_id` — present in Remote Control sessions (binary-verified, undocumented)
+- `pr.url` / `pr.kind` beyond the `!`/`#` prefix
 - `output_style.name` — current output style
 - `cost.total_api_duration_ms` — API time vs wall time
 - `context_window.remaining_percentage` — pre-calculated remaining % (inverse of `used_percentage`)
@@ -293,7 +344,7 @@ These exist in the statusline JSON but we don't leverage them:
 
 ### Closed without resolution (feature still unavailable)
 
-- [#39420](https://github.com/anthropics/claude-code/issues/39420) — Add permission_mode to statusline JSON. Closed March 2026 as duplicate of #31167, which is itself closed as a duplicate. Permission mode is still not in statusline JSON as of v2.1.211 (v2.1.203 added a built-in grey ⏸ footer badge for manual mode instead).
+- [#39420](https://github.com/anthropics/claude-code/issues/39420) — Add permission_mode to statusline JSON. Closed March 2026 as duplicate of #31167, which is itself closed as a duplicate. Permission mode is still not in statusline JSON as of v2.1.259 (the v2.1.259 builder receives `permissionMode` but only uses it to pick the plan-mode model ID) (v2.1.203 added a built-in grey ⏸ footer badge for manual mode instead).
 - [#37227](https://github.com/anthropics/claude-code/issues/37227) — Expose per-model rate limits in statusline `rate_limits`. Closed May 2026 as inactive/not planned.
 - [#33310](https://github.com/anthropics/claude-code/issues/33310) — Expose background task count in statusline JSON. Closed May 2026 as inactive/not planned.
 

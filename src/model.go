@@ -23,6 +23,8 @@ func ModelDisplayName(id, displayName string) string {
 		family = "Haiku"
 	case strings.Contains(id, "fable"):
 		family = "Fable"
+	case strings.Contains(id, "mythos"):
+		family = "Mythos"
 	default:
 		// Fallback: first word of displayName.
 		if w := strings.Fields(displayName); len(w) > 0 {

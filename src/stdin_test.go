@@ -448,3 +448,30 @@ func boolStr(b bool) string {
 	}
 	return "false"
 }
+
+func TestParseStdin_FastMode(t *testing.T) {
+	data, err := ParseStdin(strings.NewReader(`{"fast_mode": true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !data.FastMode {
+		t.Error("expected FastMode true")
+	}
+	data, err = ParseStdin(strings.NewReader(`{"model": {"id": "claude-opus-5"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data.FastMode {
+		t.Error("expected FastMode false when absent")
+	}
+}
+
+func TestParseStdin_PRKind(t *testing.T) {
+	data, err := ParseStdin(strings.NewReader(`{"pr": {"number": 7, "url": "https://gitlab.com/o/r/-/merge_requests/7", "review_state": "pending", "kind": "mr"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data.PR == nil || data.PR.Kind != "mr" || data.PR.Number != 7 {
+		t.Errorf("unexpected PR: %+v", data.PR)
+	}
+}

@@ -70,6 +70,26 @@ func TestModelDisplayName(t *testing.T) {
 			want: "Sonnet 5",
 		},
 		{
+			name: "opus single-digit version",
+			id:   "claude-opus-5",
+			want: "Opus 5",
+		},
+		{
+			name: "fable with minor version",
+			id:   "claude-fable-5-1",
+			want: "Fable 5.1",
+		},
+		{
+			name: "mythos single-digit version",
+			id:   "claude-mythos-5",
+			want: "Mythos 5",
+		},
+		{
+			name: "mythos with minor version and [1m] suffix",
+			id:   "claude-mythos-5-1[1m]",
+			want: "Mythos 5.1",
+		},
+		{
 			name: "empty id falls back to first word of display name",
 			id:          "",
 			displayName: "Claude 4 Opus",

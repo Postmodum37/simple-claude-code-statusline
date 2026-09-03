@@ -12,6 +12,7 @@ type StdinData struct {
 	ContextWindow  ContextInfo   `json:"context_window"`
 	Cost           CostInfo      `json:"cost"`
 	ExceedsTokens  bool          `json:"exceeds_200k_tokens"`
+	FastMode       bool          `json:"fast_mode"` // since Claude Code v2.1.2xx; true while /fast is on
 	SessionID      string        `json:"session_id"`
 	Agent          AgentInfo     `json:"agent"`
 	TranscriptPath string        `json:"transcript_path"`
@@ -74,6 +75,7 @@ type PRInfo struct {
 	Number      int    `json:"number"`
 	URL         string `json:"url"`
 	ReviewState string `json:"review_state"` // approved | pending | changes_requested | draft; may be absent
+	Kind        string `json:"kind"`         // "mr" for GitLab merge requests; absent for GitHub PRs
 }
 
 type ThinkingInfo struct {

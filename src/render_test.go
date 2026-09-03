@@ -17,7 +17,7 @@ func stripANSI(s string) string {
 // --- buildProgressBar tests ---
 
 func TestBuildProgressBarEmpty(t *testing.T) {
-	got := stripANSI(buildProgressBar(0, false, 0))
+	got := stripANSI(buildProgressBar(0, getSemanticColor(0), false, 0))
 	want := strings.Repeat("░", 20)
 	if got != want {
 		t.Errorf("pct=0, compact=false:\n got %q\nwant %q", got, want)
@@ -25,7 +25,7 @@ func TestBuildProgressBarEmpty(t *testing.T) {
 }
 
 func TestBuildProgressBarHalf(t *testing.T) {
-	got := stripANSI(buildProgressBar(50, false, 0))
+	got := stripANSI(buildProgressBar(50, getSemanticColor(50), false, 0))
 	want := strings.Repeat("▓", 10) + strings.Repeat("░", 10)
 	if got != want {
 		t.Errorf("pct=50, compact=false:\n got %q\nwant %q", got, want)
@@ -33,7 +33,7 @@ func TestBuildProgressBarHalf(t *testing.T) {
 }
 
 func TestBuildProgressBarFull(t *testing.T) {
-	got := stripANSI(buildProgressBar(100, false, 0))
+	got := stripANSI(buildProgressBar(100, getSemanticColor(100), false, 0))
 	want := strings.Repeat("▓", 20)
 	if got != want {
 		t.Errorf("pct=100, compact=false:\n got %q\nwant %q", got, want)
@@ -45,7 +45,7 @@ func TestBuildProgressBarCompactMarkerVisible(t *testing.T) {
 	// filled = 45*20/100 = 9
 	// markerPos = 83*20/100 = 16
 	// 9 filled + 7 empty (positions 9-15) + marker at 16 + 3 empty (17-19)
-	got := stripANSI(buildProgressBar(45, true, 83))
+	got := stripANSI(buildProgressBar(45, getSemanticColor(45), true, 83))
 	want := strings.Repeat("▓", 9) + strings.Repeat("░", 7) + "▒" + strings.Repeat("░", 3)
 	if got != want {
 		t.Errorf("pct=45, compact=true, threshold=83:\n got %q (len=%d)\nwant %q (len=%d)", got, len([]rune(got)), want, len([]rune(want)))
@@ -58,7 +58,7 @@ func TestBuildProgressBarCompactMarkerFilledPast(t *testing.T) {
 	// markerPos = 83*20/100 = 16
 	// marker at 16 < filled 17, so marker is hidden (filled over it)
 	// 17 filled + 3 empty
-	got := stripANSI(buildProgressBar(85, true, 83))
+	got := stripANSI(buildProgressBar(85, getSemanticColor(85), true, 83))
 	want := strings.Repeat("▓", 17) + strings.Repeat("░", 3)
 	if got != want {
 		t.Errorf("pct=85, compact=true, threshold=83:\n got %q\nwant %q", got, want)
@@ -70,7 +70,7 @@ func TestBuildProgressBarCompactMarkerAtEnd(t *testing.T) {
 	// filled = 45*20/100 = 9
 	// markerPos = 96*20/100 = 19 (clamped to 19)
 	// 9 filled + 10 empty (positions 9-18) + marker at 19
-	got := stripANSI(buildProgressBar(45, true, 96))
+	got := stripANSI(buildProgressBar(45, getSemanticColor(45), true, 96))
 	want := strings.Repeat("▓", 9) + strings.Repeat("░", 10) + "▒"
 	if got != want {
 		t.Errorf("pct=45, compact=true, threshold=96:\n got %q (len=%d)\nwant %q (len=%d)", got, len([]rune(got)), want, len([]rune(want)))
@@ -98,6 +98,69 @@ func TestGetSemanticColor(t *testing.T) {
 		got := getSemanticColor(tt.pct)
 		if got != tt.want {
 			t.Errorf("getSemanticColor(%d) [%s] = %q, want %q", tt.pct, tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestContextColor(t *testing.T) {
+	tests := []struct {
+		name   string
+		pct    int
+		tokens int
+		want   string
+	}{
+		// 200k window: identical to the percent bands
+		{"200k 42% (84k)", 42, 84000, cOK},
+		{"200k 60% (120k)", 60, 120000, cWarn},
+		{"200k 76% (152k)", 76, 152000, cHigh},
+		{"200k 95% (190k)", 95, 190000, cCrit},
+		// 1M window: absolute-token bands tighten the color
+		{"1M 10% (100k)", 10, 100000, cOK},
+		{"1M 15% (150k)", 15, 150000, cOK},
+		{"1M 20% (200k)", 20, 200000, cWarn},
+		{"1M 30% (300k)", 30, 300000, cWarn},
+		{"1M 35% (350k)", 35, 350000, cHigh},
+		{"1M 42% (420k)", 42, 420000, cCrit},
+		{"1M 96% (960k)", 96, 960000, cCrit},
+	}
+	for _, tt := range tests {
+		if got := contextColor(tt.pct, tt.tokens); got != tt.want {
+			t.Errorf("%s: contextColor(%d, %d) = %q, want %q", tt.name, tt.pct, tt.tokens, got, tt.want)
+		}
+	}
+}
+
+func TestUsageColor(t *testing.T) {
+	now := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
+	h := time.Hour
+	tests := []struct {
+		name     string
+		used     int
+		window   int
+		resetsIn time.Duration
+		want     string
+	}{
+		{"no reset time falls back to raw bands (42%)", 42, fiveHourWindowSecs, 0, cOK},
+		{"no reset time falls back to raw bands (80%)", 80, fiveHourWindowSecs, 0, cHigh},
+		{"40% used, half the window elapsed → projected 80%", 40, fiveHourWindowSecs, 150 * time.Minute, cOK},
+		{"45% used, half elapsed → projected 90%", 45, fiveHourWindowSecs, 150 * time.Minute, cWarn},
+		{"55% used, half elapsed → projected 110%", 55, fiveHourWindowSecs, 150 * time.Minute, cHigh},
+		{"40% used, 1h elapsed → projected 200%", 40, fiveHourWindowSecs, 4 * h, cCrit},
+		{"80% used, 20 minutes left → projected ~86%, floor to orange", 80, fiveHourWindowSecs, 20 * time.Minute, cHigh},
+		{"92% used, 5 minutes left → red floor", 92, fiveHourWindowSecs, 5 * time.Minute, cCrit},
+		{"10% used, 2 minutes in → clamped elapsed, capped at yellow", 10, fiveHourWindowSecs, 5*h - 2*time.Minute, cWarn},
+		{"3% used, 2 minutes in → projected 60% → green", 3, fiveHourWindowSecs, 5*h - 2*time.Minute, cOK},
+		{"7d: 30% used, 3 days elapsed → projected 70%", 30, sevenDayWindowSecs, 4 * 24 * h, cOK},
+		{"7d: 60% used, 3 days elapsed → projected 140%", 60, sevenDayWindowSecs, 4 * 24 * h, cCrit},
+		{"reset time in the past → elapsed clamped to full window", 70, fiveHourWindowSecs, -10 * time.Minute, cOK},
+	}
+	for _, tt := range tests {
+		var resetsAt time.Time
+		if tt.resetsIn != 0 {
+			resetsAt = now.Add(tt.resetsIn)
+		}
+		if got := usageColor(tt.used, tt.window, resetsAt, now); got != tt.want {
+			t.Errorf("%s: usageColor(%d) = %q, want %q", tt.name, tt.used, got, tt.want)
 		}
 	}
 }
@@ -176,7 +239,8 @@ func TestRenderFullData(t *testing.T) {
 	}
 
 	// Row 2 checks
-	if !strings.Contains(row2, "84k/200k") {
+	// 60000 input + 2000 cache create + 2000 cache read = 64k (output tokens excluded, matching used_percentage)
+	if !strings.Contains(row2, "64k/200k") {
 		t.Errorf("row2 missing tokens: %q", row2)
 	}
 	if !strings.Contains(row2, "5h:42%") {
@@ -318,9 +382,9 @@ func TestRenderContextCurrentUsageOnly(t *testing.T) {
 	Render(&buf, stdin, nil, nil, compact)
 	output := stripANSI(buf.String())
 
-	// 100k total, 200k window = 50%
-	if !strings.Contains(output, "100k/200k") {
-		t.Errorf("expected 100k/200k with current_usage only, got %q", output)
+	// 80k input (output tokens excluded), 200k window = 40%
+	if !strings.Contains(output, "80k/200k") {
+		t.Errorf("expected 80k/200k with current_usage only, got %q", output)
 	}
 }
 
@@ -542,6 +606,8 @@ func TestPRBadge(t *testing.T) {
 		{"changes requested", &PRInfo{Number: 42, ReviewState: "changes_requested"}, cMuted + "#42" + cReset + " " + cGitDel + "✗" + cReset},
 		{"draft", &PRInfo{Number: 42, ReviewState: "draft"}, cMuted + "#42" + cReset + " " + cMuted + "◌" + cReset},
 		{"unknown state shows number only", &PRInfo{Number: 42, ReviewState: "future-state"}, cMuted + "#42" + cReset},
+		{"gitlab merge request uses ! prefix", &PRInfo{Number: 42, ReviewState: "approved", Kind: "mr"}, cMuted + "!42" + cReset + " " + cGitAdd + "✓" + cReset},
+		{"unknown kind keeps # prefix", &PRInfo{Number: 42, Kind: "cr"}, cMuted + "#42" + cReset},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -582,6 +648,34 @@ func TestRenderPRBadgeAbsentWithoutGit(t *testing.T) {
 
 	if strings.Contains(row1, "#1234") {
 		t.Errorf("PR badge should not render without git info, got %q", row1)
+	}
+}
+
+func TestRenderFastModeMarker(t *testing.T) {
+	var buf bytes.Buffer
+	stdin := &StdinData{
+		Model:    ModelInfo{ID: "claude-opus-5"},
+		FastMode: true,
+		Thinking: &ThinkingInfo{Enabled: true},
+		Effort:   &EffortInfo{Level: "high"},
+		Agent:    AgentInfo{Name: "reviewer"},
+	}
+	Render(&buf, stdin, nil, nil, CompactInfo{})
+	row1 := strings.Split(stripANSI(buf.String()), "\n")[0]
+
+	if !strings.HasPrefix(row1, "Opus 5⚡*•high [reviewer]") {
+		t.Errorf("expected fast marker between model and thinking marker, got %q", row1)
+	}
+}
+
+func TestRenderFastModeAbsent(t *testing.T) {
+	var buf bytes.Buffer
+	stdin := &StdinData{Model: ModelInfo{ID: "claude-opus-5"}}
+	Render(&buf, stdin, nil, nil, CompactInfo{})
+	row1 := strings.Split(stripANSI(buf.String()), "\n")[0]
+
+	if strings.Contains(row1, "⚡") {
+		t.Errorf("row1 should not contain ⚡ when fast_mode is false, got %q", row1)
 	}
 }
 
