@@ -50,7 +50,7 @@ The 5h and 7d percentages are colored by **pace**, not raw fill: 80% used with 2
 | 100–119% | Orange |
 | ≥ 120% | Red |
 
-Two guards: below 20% used the color is capped at yellow (early-window projections are noisy), and at 75%+ / 90%+ used the color is at least orange / red regardless of pace, because a nearly empty window blocks you either way. Without a reset time the raw-fill bands above are used.
+Three guards keep pace honest. Elapsed time is clamped to at least 25% of the window before projecting, because one heavy hour at the start of a 5h window (or one heavy day at the start of a 7d window) extrapolates to nonsense. Pace can raise the raw-fill band by at most one step, so 27% used can be yellow at worst, never red. And at 75%+ / 90%+ used the color is at least orange / red regardless of pace, because a nearly empty window blocks you either way. Without a reset time the raw-fill bands above are used.
 
 ### Git Features
 

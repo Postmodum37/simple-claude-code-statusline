@@ -12,18 +12,18 @@ import (
 
 const (
 	cReset     = "\033[0m"
-	cAccent    = "\033[38;5;111m"  // bright blue
-	cMuted     = "\033[38;5;146m"  // muted text
-	cWhite     = "\033[38;5;254m"  // white
-	cOK        = "\033[38;5;114m"  // green (0-50%)
-	cWarn      = "\033[38;5;214m"  // yellow (51-75%)
-	cHigh      = "\033[38;5;208m"  // orange (76-90%)
-	cCrit      = "\033[38;5;196m"  // red (91%+)
-	cGitAdd    = "\033[38;5;114m"  // green
-	cGitMod    = "\033[38;5;214m"  // yellow
-	cGitDel    = "\033[38;5;196m"  // red
-	cGitAhead  = "\033[38;5;81m"   // cyan
-	cGitBehind = "\033[38;5;208m"  // orange
+	cAccent    = "\033[38;5;111m" // bright blue
+	cMuted     = "\033[38;5;146m" // muted text
+	cWhite     = "\033[38;5;254m" // white
+	cOK        = "\033[38;5;114m" // green (0-50%)
+	cWarn      = "\033[38;5;214m" // yellow (51-75%)
+	cHigh      = "\033[38;5;208m" // orange (76-90%)
+	cCrit      = "\033[38;5;196m" // red (91%+)
+	cGitAdd    = "\033[38;5;114m" // green
+	cGitMod    = "\033[38;5;214m" // yellow
+	cGitDel    = "\033[38;5;196m" // red
+	cGitAhead  = "\033[38;5;81m"  // cyan
+	cGitBehind = "\033[38;5;208m" // orange
 )
 
 // CompactInfo holds auto-compact state for the progress bar.
@@ -107,19 +107,29 @@ const (
 	sevenDayWindowSecs = 7 * 24 * 3600
 )
 
+// Pace projection needs a meaningful slice of the window before it says
+// anything: one heavy hour at the start of a 5h window (or one heavy day at
+// the start of a 7d window) extrapolates to absurd numbers. Elapsed time is
+// clamped to at least this fraction of the window before projecting.
+const paceMinElapsedFraction = 0.25
+
 // usageColor colors a rate-limit window by pace rather than raw fill: 80% used
 // with 20 minutes left is fine, 40% used with 4.5h left will run out. It
 // projects end-of-window usage from the fraction of the window elapsed.
-// Floors keep a nearly exhausted window visibly urgent regardless of pace, and
-// a cap keeps early-window noise from screaming while usage is still low.
-// Falls back to the raw-fill bands when the reset time is unknown.
+//
+// Pace can relax the raw-fill band (getSemanticColor) freely but raise it by
+// at most one step, so a window that is barely used can never show red no
+// matter how bursty the start was. Floors keep a nearly
+// exhausted window visibly urgent regardless of pace. Falls back to the
+// raw-fill bands when the reset time is unknown.
 func usageColor(usedPct int, windowSecs int, resetsAt, now time.Time) string {
+	raw := getSemanticColor(usedPct)
 	if resetsAt.IsZero() || windowSecs <= 0 {
-		return getSemanticColor(usedPct)
+		return raw
 	}
 	remaining := resetsAt.Sub(now).Seconds()
 	elapsed := float64(windowSecs) - remaining
-	minElapsed := float64(windowSecs) * 0.05
+	minElapsed := float64(windowSecs) * paceMinElapsedFraction
 	if elapsed < minElapsed {
 		elapsed = minElapsed
 	}
@@ -128,21 +138,22 @@ func usageColor(usedPct int, windowSecs int, resetsAt, now time.Time) string {
 	}
 	projected := float64(usedPct) * float64(windowSecs) / elapsed
 
-	var color string
+	var pace string
 	switch {
 	case projected < 85:
-		color = cOK
+		pace = cOK
 	case projected < 100:
-		color = cWarn
+		pace = cWarn
 	case projected < 120:
-		color = cHigh
+		pace = cHigh
 	default:
-		color = cCrit
+		pace = cCrit
 	}
 
-	// Cap: with under 20% used there is plenty of headroom whatever the pace.
-	if usedPct < 20 && severity(color) > severity(cWarn) {
-		color = cWarn
+	// Pace may escalate the raw-fill band by at most one step.
+	color := pace
+	if severity(color) > severity(raw)+1 {
+		color = colorForSeverity(severity(raw) + 1)
 	}
 	// Floors: a nearly empty window blocks you no matter the pace.
 	if usedPct >= 90 {
@@ -151,6 +162,20 @@ func usageColor(usedPct int, windowSecs int, resetsAt, now time.Time) string {
 		color = worseColor(color, cHigh)
 	}
 	return color
+}
+
+// colorForSeverity is the inverse of severity.
+func colorForSeverity(level int) string {
+	switch level {
+	case 3:
+		return cCrit
+	case 2:
+		return cHigh
+	case 1:
+		return cWarn
+	default:
+		return cOK
+	}
 }
 
 // effortColor returns the color for an effort level. "auto" is a mode that
