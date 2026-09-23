@@ -26,48 +26,37 @@ const (
 	cGitBehind = "\033[38;5;208m" // orange
 )
 
-// CompactInfo holds auto-compact state for the progress bar.
-type CompactInfo struct {
-	Enabled      bool
-	ThresholdPct int
+// paint wraps s in an ANSI color and reset.
+func paint(color, s string) string {
+	return color + s + cReset
 }
 
-// --- Semantic color ---
+// --- Severity levels ---
 
-// getSemanticColor returns an ANSI color code based on a usage percentage.
-func getSemanticColor(pct int) string {
+// level is a semantic severity; signals are combined with max/min.
+type level int
+
+const (
+	lvlOK level = iota
+	lvlWarn
+	lvlHigh
+	lvlCrit
+)
+
+var levelColor = [...]string{lvlOK: cOK, lvlWarn: cWarn, lvlHigh: cHigh, lvlCrit: cCrit}
+
+// pctLevel maps a usage percentage to a severity: ≤50 ok, ≤75 warn, ≤90 high.
+func pctLevel(pct int) level {
 	switch {
 	case pct <= 50:
-		return cOK
+		return lvlOK
 	case pct <= 75:
-		return cWarn
+		return lvlWarn
 	case pct <= 90:
-		return cHigh
+		return lvlHigh
 	default:
-		return cCrit
+		return lvlCrit
 	}
-}
-
-// severity ranks the semantic colors so two signals can be combined by
-// taking the worse one.
-func severity(color string) int {
-	switch color {
-	case cCrit:
-		return 3
-	case cHigh:
-		return 2
-	case cWarn:
-		return 1
-	default:
-		return 0
-	}
-}
-
-func worseColor(a, b string) string {
-	if severity(b) > severity(a) {
-		return b
-	}
-	return a
 }
 
 // Absolute-token quality bands. Model quality degrades with the number of
@@ -81,24 +70,24 @@ const (
 	ctxTokensHigh = 400000 // ≤400k: rot zone approaching; beyond: expect degraded recall
 )
 
-func absoluteTokenColor(tokens int) string {
+func tokenLevel(tokens int) level {
 	switch {
 	case tokens <= ctxTokensOK:
-		return cOK
+		return lvlOK
 	case tokens <= ctxTokensWarn:
-		return cWarn
+		return lvlWarn
 	case tokens <= ctxTokensHigh:
-		return cHigh
+		return lvlHigh
 	default:
-		return cCrit
+		return lvlCrit
 	}
 }
 
 // contextColor colors context usage by the worse of the percent-of-window band
-// and the absolute-token band. Identical to getSemanticColor for windows of
+// and the absolute-token band. Identical to the percent band for windows of
 // 200k or less.
 func contextColor(pct, tokens int) string {
-	return worseColor(getSemanticColor(pct), absoluteTokenColor(tokens))
+	return levelColor[max(pctLevel(pct), tokenLevel(tokens))]
 }
 
 // Rate-limit window lengths in seconds.
@@ -117,65 +106,42 @@ const paceMinElapsedFraction = 0.25
 // with 20 minutes left is fine, 40% used with 4.5h left will run out. It
 // projects end-of-window usage from the fraction of the window elapsed.
 //
-// Pace can relax the raw-fill band (getSemanticColor) freely but raise it by
-// at most one step, so a window that is barely used can never show red no
-// matter how bursty the start was. Floors keep a nearly
-// exhausted window visibly urgent regardless of pace. Falls back to the
-// raw-fill bands when the reset time is unknown.
+// Pace can relax the raw-fill band (pctLevel) freely but raise it by at most
+// one step, so a window that is barely used can never show red no matter how
+// bursty the start was. Floors keep a nearly exhausted window visibly urgent
+// regardless of pace. Falls back to the raw-fill bands when the reset time is
+// unknown.
 func usageColor(usedPct int, windowSecs int, resetsAt, now time.Time) string {
-	raw := getSemanticColor(usedPct)
+	raw := pctLevel(usedPct)
 	if resetsAt.IsZero() || windowSecs <= 0 {
-		return raw
+		return levelColor[raw]
 	}
-	remaining := resetsAt.Sub(now).Seconds()
-	elapsed := float64(windowSecs) - remaining
-	minElapsed := float64(windowSecs) * paceMinElapsedFraction
-	if elapsed < minElapsed {
-		elapsed = minElapsed
-	}
-	if elapsed > float64(windowSecs) {
-		elapsed = float64(windowSecs)
-	}
-	projected := float64(usedPct) * float64(windowSecs) / elapsed
+	window := float64(windowSecs)
+	elapsed := window - resetsAt.Sub(now).Seconds()
+	elapsed = min(max(elapsed, window*paceMinElapsedFraction), window)
+	projected := float64(usedPct) * window / elapsed
 
-	var pace string
+	var pace level
 	switch {
 	case projected < 85:
-		pace = cOK
+		pace = lvlOK
 	case projected < 100:
-		pace = cWarn
+		pace = lvlWarn
 	case projected < 120:
-		pace = cHigh
+		pace = lvlHigh
 	default:
-		pace = cCrit
+		pace = lvlCrit
 	}
 
-	// Pace may escalate the raw-fill band by at most one step.
-	color := pace
-	if severity(color) > severity(raw)+1 {
-		color = colorForSeverity(severity(raw) + 1)
-	}
+	lvl := min(pace, raw+1) // pace may escalate the raw-fill band by at most one step
 	// Floors: a nearly empty window blocks you no matter the pace.
-	if usedPct >= 90 {
-		color = cCrit
-	} else if usedPct >= 75 {
-		color = worseColor(color, cHigh)
+	switch {
+	case usedPct >= 90:
+		lvl = lvlCrit
+	case usedPct >= 75:
+		lvl = max(lvl, lvlHigh)
 	}
-	return color
-}
-
-// colorForSeverity is the inverse of severity.
-func colorForSeverity(level int) string {
-	switch level {
-	case 3:
-		return cCrit
-	case 2:
-		return cHigh
-	case 1:
-		return cWarn
-	default:
-		return cOK
-	}
+	return levelColor[lvl]
 }
 
 // effortColor returns the color for an effort level. "auto" is a mode that
@@ -208,36 +174,18 @@ func effortColor(level string) string {
 func buildProgressBar(pct int, color string, compactEnabled bool, compactThresholdPct int) string {
 	const barWidth = 20
 
-	filled := pct * barWidth / 100
-	if filled < 0 {
-		filled = 0
-	}
-	if filled > barWidth {
-		filled = barWidth
-	}
-
-	markerPos := compactThresholdPct * barWidth / 100
-	if markerPos < 0 {
-		markerPos = 0
-	}
-	if markerPos > barWidth-1 {
-		markerPos = barWidth - 1
-	}
+	filled := min(max(pct*barWidth/100, 0), barWidth)
+	markerPos := min(max(compactThresholdPct*barWidth/100, 0), barWidth-1)
 
 	var b strings.Builder
 	for i := 0; i < barWidth; i++ {
-		if i < filled {
-			b.WriteString(color)
-			b.WriteString("▓")
-			b.WriteString(cReset)
-		} else if compactEnabled && i == markerPos && i >= filled {
-			b.WriteString(cWarn)
-			b.WriteString("▒")
-			b.WriteString(cReset)
-		} else {
-			b.WriteString(cMuted)
-			b.WriteString("░")
-			b.WriteString(cReset)
+		switch {
+		case i < filled:
+			b.WriteString(paint(color, "▓"))
+		case compactEnabled && i == markerPos:
+			b.WriteString(paint(cWarn, "▒"))
+		default:
+			b.WriteString(paint(cMuted, "░"))
 		}
 	}
 	return b.String()
@@ -246,75 +194,69 @@ func buildProgressBar(pct int, color string, compactEnabled bool, compactThresho
 // --- Separator ---
 
 func sep() string {
-	return " " + cMuted + "│" + cReset + " "
+	return " " + paint(cMuted, "│") + " "
 }
 
 // --- Render ---
 
 // Render writes two lines of ANSI-formatted statusline output to w.
-func Render(w io.Writer, stdin *StdinData, git *GitStatus, usage *UsageData, compact CompactInfo) {
-	row1 := buildRow1(stdin, git)
-	row2 := buildRow2(stdin, usage, compact)
-	fmt.Fprintf(w, "%s\n%s", row1, row2)
+func Render(w io.Writer, stdin *StdinData, git *GitStatus, compact CompactInfo) {
+	fmt.Fprintf(w, "%s\n%s", buildRow1(stdin, git), buildRow2(stdin, compact, time.Now()))
 }
 
-// buildRow1 constructs: {model}[⚡][*][•{effort}] [{agent}] │ {dir} │ {branch} [wt:{worktree}] {git_status} [#PR {state}] │ {+N/-M}
+// buildRow1 constructs: {model}[⚡][∅][•{effort}] [{agent}] │ {dir} │ {branch} [wt:{worktree}] {git_status} [#PR {state}] │ {+N/-M}
 func buildRow1(stdin *StdinData, git *GitStatus) string {
 	var parts []string
 
-	// Model + thinking + effort + agent
-	modelPart := cWhite + ModelDisplayName(stdin.Model.ID, stdin.Model.DisplayName) + cReset
+	// Model + fast + thinking-off + effort + agent
+	modelPart := paint(cWhite, ModelDisplayName(stdin.Model.ID, stdin.Model.DisplayName))
 	if stdin.FastMode {
-		modelPart += cWarn + "⚡" + cReset
+		modelPart += paint(cWarn, "⚡")
 	}
-	if stdin.Thinking != nil && stdin.Thinking.Enabled {
-		modelPart += cMuted + "*" + cReset
+	// Thinking is on by default (and can't be disabled on some models), so
+	// only the exception is marked.
+	if stdin.Thinking != nil && !stdin.Thinking.Enabled {
+		modelPart += paint(cMuted, "∅")
 	}
 	if stdin.Effort != nil && stdin.Effort.Level != "" {
-		modelPart += cMuted + "•" + cReset + effortColor(stdin.Effort.Level) + stdin.Effort.Level + cReset
+		modelPart += paint(cMuted, "•") + paint(effortColor(stdin.Effort.Level), stdin.Effort.Level)
 	}
 	if stdin.Agent.Name != "" {
-		modelPart += " " + cMuted + "[" + stdin.Agent.Name + "]" + cReset
+		modelPart += " " + paint(cMuted, "["+stdin.Agent.Name+"]")
 	}
 	parts = append(parts, modelPart)
 
 	// Directory
-	home := os.Getenv("HOME")
-	dir := AbbreviatePath(stdin.CWD, stdin.Workspace.ProjectDir, home)
-	if dir != "" {
-		parts = append(parts, cAccent+dir+cReset)
+	if dir := AbbreviatePath(stdin.CWD, stdin.Workspace.ProjectDir, os.Getenv("HOME")); dir != "" {
+		parts = append(parts, paint(cAccent, dir))
 	}
 
 	// Git
 	if git != nil && git.Branch != "" {
-		gitPart := cAccent + git.Branch + cReset
+		gitPart := paint(cAccent, git.Branch)
 
-		worktreeName := git.Worktree
+		worktreeName := stdin.Workspace.GitWorktree
 		if stdin.Worktree != nil && stdin.Worktree.Name != "" {
 			worktreeName = stdin.Worktree.Name
 		}
 		if worktreeName != "" {
-			gitPart += " " + cMuted + "[wt:" + worktreeName + "]" + cReset
+			gitPart += " " + paint(cMuted, "[wt:"+worktreeName+"]")
 		}
 
-		var statusParts []string
-		if git.Added > 0 {
-			statusParts = append(statusParts, fmt.Sprintf("%s✚%d%s", cGitAdd, git.Added, cReset))
-		}
-		if git.Modified > 0 {
-			statusParts = append(statusParts, fmt.Sprintf("%s●%d%s", cGitMod, git.Modified, cReset))
-		}
-		if git.Deleted > 0 {
-			statusParts = append(statusParts, fmt.Sprintf("%s✖%d%s", cGitDel, git.Deleted, cReset))
-		}
-		if git.Ahead > 0 {
-			statusParts = append(statusParts, fmt.Sprintf("%s↑%d%s", cGitAhead, git.Ahead, cReset))
-		}
-		if git.Behind > 0 {
-			statusParts = append(statusParts, fmt.Sprintf("%s↓%d%s", cGitBehind, git.Behind, cReset))
-		}
-		if len(statusParts) > 0 {
-			gitPart += " " + strings.Join(statusParts, " ")
+		for _, st := range []struct {
+			n     int
+			glyph string
+			color string
+		}{
+			{git.Added, "✚", cGitAdd},
+			{git.Modified, "●", cGitMod},
+			{git.Deleted, "✖", cGitDel},
+			{git.Ahead, "↑", cGitAhead},
+			{git.Behind, "↓", cGitBehind},
+		} {
+			if st.n > 0 {
+				gitPart += " " + paint(st.color, fmt.Sprintf("%s%d", st.glyph, st.n))
+			}
 		}
 
 		if badge := prBadge(stdin.PR); badge != "" {
@@ -325,15 +267,15 @@ func buildRow1(stdin *StdinData, git *GitStatus) string {
 	}
 
 	// Lines changed
-	if stdin.Cost.TotalLinesAdded > 0 || stdin.Cost.TotalLinesRemoved > 0 {
-		var linesParts []string
-		if stdin.Cost.TotalLinesAdded > 0 {
-			linesParts = append(linesParts, fmt.Sprintf("%s+%d%s", cGitAdd, stdin.Cost.TotalLinesAdded, cReset))
-		}
-		if stdin.Cost.TotalLinesRemoved > 0 {
-			linesParts = append(linesParts, fmt.Sprintf("%s-%d%s", cGitDel, stdin.Cost.TotalLinesRemoved, cReset))
-		}
-		parts = append(parts, strings.Join(linesParts, "/"))
+	var lines []string
+	if n := stdin.Cost.TotalLinesAdded; n > 0 {
+		lines = append(lines, paint(cGitAdd, fmt.Sprintf("+%d", n)))
+	}
+	if n := stdin.Cost.TotalLinesRemoved; n > 0 {
+		lines = append(lines, paint(cGitDel, fmt.Sprintf("-%d", n)))
+	}
+	if len(lines) > 0 {
+		parts = append(parts, strings.Join(lines, "/"))
 	}
 
 	return strings.Join(parts, sep())
@@ -349,175 +291,82 @@ func prBadge(pr *PRInfo) string {
 	if pr.Kind == "mr" {
 		prefix = "!"
 	}
-	badge := cMuted + prefix + fmt.Sprintf("%d", pr.Number) + cReset
+	badge := paint(cMuted, fmt.Sprintf("%s%d", prefix, pr.Number))
 	switch pr.ReviewState {
 	case "approved":
-		badge += " " + cGitAdd + "✓" + cReset
+		badge += " " + paint(cGitAdd, "✓")
 	case "pending":
-		badge += " " + cGitMod + "⏳" + cReset
+		badge += " " + paint(cGitMod, "⏳")
 	case "changes_requested":
-		badge += " " + cGitDel + "✗" + cReset
+		badge += " " + paint(cGitDel, "✗")
 	case "draft":
-		badge += " " + cMuted + "◌" + cReset
+		badge += " " + paint(cMuted, "◌")
 	}
 	return badge
 }
 
-// buildRow2 constructs: {bar} {tokens}/{max} [>200k] [(↻X%)] │ 5h:X% (Ym) │ 7d:X% (Ym) │ $X.XX │ Xm
-func buildRow2(stdin *StdinData, usage *UsageData, compact CompactInfo) string {
-	var parts []string
-
-	// --- Context section ---
-	contextPart := buildContextSection(stdin, compact)
-	parts = append(parts, contextPart)
-
-	// --- Usage section ---
-	usagePart := buildUsageSection(usage)
-	parts = append(parts, usagePart)
-
-	// --- Cost ---
-	costStr := FormatCost(stdin.Cost.TotalCostUSD)
-	if costStr != "" {
-		parts = append(parts, cWhite+costStr+cReset)
+// buildRow2 constructs: {bar} {tokens}/{max} [(↻X%)] │ 5h:X% (Ym) │ 7d:X% (Ym) │ $X.XX │ Xm
+func buildRow2(stdin *StdinData, compact CompactInfo, now time.Time) string {
+	var fiveHour, sevenDay *RateLimitWindow
+	if rl := stdin.RateLimits; rl != nil {
+		fiveHour, sevenDay = rl.FiveHour, rl.SevenDay
 	}
-
-	// --- Duration ---
-	durationSecs := stdin.Cost.TotalDurationMs / 1000
-	parts = append(parts, cMuted+FormatDuration(durationSecs)+cReset)
-
+	parts := []string{
+		buildContextSection(stdin.ContextWindow, compact),
+		formatUsageWindow("5h", fiveHourWindowSecs, fiveHour, now),
+		formatUsageWindow("7d", sevenDayWindowSecs, sevenDay, now),
+	}
+	if cost := FormatCost(stdin.Cost.TotalCostUSD); cost != "" {
+		parts = append(parts, paint(cWhite, cost))
+	}
+	parts = append(parts, paint(cMuted, FormatDuration(stdin.Cost.TotalDurationMs/1000)))
 	return strings.Join(parts, sep())
 }
 
-// contextTokens returns the number of tokens occupying the context window,
-// using the same definition Claude Code uses for used_percentage and
-// total_input_tokens: input + cache creation + cache read. Output tokens of
-// the last response are excluded so the count agrees with the percentage.
-func contextTokens(u *CurrentUsage) int {
-	return u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
-}
-
-// buildContextSection builds the context bar + tokens + indicators.
-func buildContextSection(stdin *StdinData, compact CompactInfo) string {
+// buildContextSection builds the context bar + tokens + auto-compact marker.
+// used_percentage is the source of truth for the bar; it and the token count
+// are null/zero together until the first API response.
+func buildContextSection(cw ContextInfo, compact CompactInfo) string {
 	var pct int
-	var tokens int
-	var tokensStr string
-	hasData := false
-
-	windowSize := stdin.ContextWindow.ContextWindowSize
-	windowStr := FormatTokens(windowSize)
-
-	if stdin.ContextWindow.UsedPercentage != nil {
-		// Priority 1: used_percentage is the source of truth for bar/color
-		pct = int(*stdin.ContextWindow.UsedPercentage)
-		hasData = true
-
-		if stdin.ContextWindow.CurrentUsage != nil {
-			// Use actual token counts for display
-			tokens = contextTokens(stdin.ContextWindow.CurrentUsage)
-		} else {
-			// Estimate tokens from percentage
-			tokens = pct * windowSize / 100
-		}
-		tokensStr = FormatTokens(tokens)
-	} else if stdin.ContextWindow.CurrentUsage != nil {
-		// Priority 2: calculate from current_usage
-		tokens = contextTokens(stdin.ContextWindow.CurrentUsage)
-		hasData = true
-		tokensStr = FormatTokens(tokens)
-
-		if windowSize > 0 {
-			pct = tokens * 100 / windowSize
-		}
-	}
-
-	var b strings.Builder
-
-	if hasData {
-		color := contextColor(pct, tokens)
-
-		// Progress bar
-		b.WriteString(buildProgressBar(pct, color, compact.Enabled, compact.ThresholdPct))
-		b.WriteString(" ")
-
-		// Tokens display
-		b.WriteString(color)
-		b.WriteString(tokensStr)
-		b.WriteString(cReset)
-		b.WriteString("/")
-		b.WriteString(cMuted)
-		b.WriteString(windowStr)
-		b.WriteString(cReset)
+	var out string
+	if cw.UsedPercentage == nil {
+		out = buildProgressBar(0, cOK, compact.Enabled, compact.ThresholdPct) + " " + paint(cMuted, "\u2014")
 	} else {
-		// No data — show dash
-		b.WriteString(buildProgressBar(0, cOK, compact.Enabled, compact.ThresholdPct))
-		b.WriteString(" ")
-		b.WriteString(cMuted)
-		b.WriteString("\u2014") // em dash
-		b.WriteString(cReset)
+		pct = int(*cw.UsedPercentage)
+		color := contextColor(pct, cw.TotalInputTokens)
+		out = buildProgressBar(pct, color, compact.Enabled, compact.ThresholdPct) + " " +
+			paint(color, FormatTokens(cw.TotalInputTokens)) + "/" + paint(cMuted, FormatTokens(cw.ContextWindowSize))
 	}
 
-	// >200k indicator
-	if stdin.ExceedsTokens {
-		b.WriteString(" ")
-		b.WriteString(cHigh)
-		b.WriteString(">200k")
-		b.WriteString(cReset)
-	}
-
-	// Auto-compact indicator
 	if compact.Enabled {
-		b.WriteString(" ")
 		if pct >= compact.ThresholdPct {
-			b.WriteString(cWarn)
-			b.WriteString(fmt.Sprintf("(↻%d%%!)", compact.ThresholdPct))
-			b.WriteString(cReset)
+			out += " " + paint(cWarn, fmt.Sprintf("(↻%d%%!)", compact.ThresholdPct))
 		} else {
-			b.WriteString(cMuted)
-			b.WriteString(fmt.Sprintf("(↻%d%%)", compact.ThresholdPct))
-			b.WriteString(cReset)
+			out += " " + paint(cMuted, fmt.Sprintf("(↻%d%%)", compact.ThresholdPct))
 		}
 	}
-
-	return b.String()
-}
-
-// buildUsageSection builds the 5h/7d usage display.
-func buildUsageSection(usage *UsageData) string {
-	if usage == nil {
-		return cMuted + "5h:\u2014" + cReset + sep() + cMuted + "7d:\u2014" + cReset
-	}
-
-	now := time.Now()
-	var parts []string
-	parts = append(parts, formatUsageWindow("5h", fiveHourWindowSecs, usage.FiveHour, now))
-	parts = append(parts, formatUsageWindow("7d", sevenDayWindowSecs, usage.SevenDay, now))
-
-	return strings.Join(parts, sep())
+	return out
 }
 
 // formatUsageWindow formats a single usage window like "5h:42% (2h)", colored
-// by pace (see usageColor).
-func formatUsageWindow(label string, windowSecs int, window *UsageWindow, now time.Time) string {
-	if window == nil {
-		return cMuted + label + ":\u2014" + cReset
+// by pace (see usageColor). Absent windows render as a dash.
+func formatUsageWindow(label string, windowSecs int, w *RateLimitWindow, now time.Time) string {
+	if w == nil {
+		return paint(cMuted, label+":\u2014")
 	}
 
-	pct := int(window.Utilization)
-
+	var pct int
+	if w.UsedPercentage != nil {
+		pct = int(*w.UsedPercentage)
+	}
 	var resetsAt time.Time
-	if window.ResetsAt != "" {
-		if t, err := time.Parse(time.RFC3339, window.ResetsAt); err == nil {
-			resetsAt = t
-		}
+	if w.ResetsAt != nil {
+		resetsAt = time.Unix(int64(*w.ResetsAt), 0)
 	}
-	color := usageColor(pct, windowSecs, resetsAt, now)
 
-	result := color + fmt.Sprintf("%s:%d%%", label, pct) + cReset
-
+	result := paint(usageColor(pct, windowSecs, resetsAt, now), fmt.Sprintf("%s:%d%%", label, pct))
 	if !resetsAt.IsZero() {
-		resetStr := FormatResetTime(window.ResetsAt, now)
-		result += " " + cMuted + "(" + resetStr + ")" + cReset
+		result += " " + paint(cMuted, "("+FormatResetTime(resetsAt, now)+")")
 	}
-
 	return result
 }

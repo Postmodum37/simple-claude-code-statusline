@@ -17,7 +17,7 @@ func stripANSI(s string) string {
 // --- buildProgressBar tests ---
 
 func TestBuildProgressBarEmpty(t *testing.T) {
-	got := stripANSI(buildProgressBar(0, getSemanticColor(0), false, 0))
+	got := stripANSI(buildProgressBar(0, levelColor[pctLevel(0)], false, 0))
 	want := strings.Repeat("░", 20)
 	if got != want {
 		t.Errorf("pct=0, compact=false:\n got %q\nwant %q", got, want)
@@ -25,7 +25,7 @@ func TestBuildProgressBarEmpty(t *testing.T) {
 }
 
 func TestBuildProgressBarHalf(t *testing.T) {
-	got := stripANSI(buildProgressBar(50, getSemanticColor(50), false, 0))
+	got := stripANSI(buildProgressBar(50, levelColor[pctLevel(50)], false, 0))
 	want := strings.Repeat("▓", 10) + strings.Repeat("░", 10)
 	if got != want {
 		t.Errorf("pct=50, compact=false:\n got %q\nwant %q", got, want)
@@ -33,7 +33,7 @@ func TestBuildProgressBarHalf(t *testing.T) {
 }
 
 func TestBuildProgressBarFull(t *testing.T) {
-	got := stripANSI(buildProgressBar(100, getSemanticColor(100), false, 0))
+	got := stripANSI(buildProgressBar(100, levelColor[pctLevel(100)], false, 0))
 	want := strings.Repeat("▓", 20)
 	if got != want {
 		t.Errorf("pct=100, compact=false:\n got %q\nwant %q", got, want)
@@ -45,7 +45,7 @@ func TestBuildProgressBarCompactMarkerVisible(t *testing.T) {
 	// filled = 45*20/100 = 9
 	// markerPos = 83*20/100 = 16
 	// 9 filled + 7 empty (positions 9-15) + marker at 16 + 3 empty (17-19)
-	got := stripANSI(buildProgressBar(45, getSemanticColor(45), true, 83))
+	got := stripANSI(buildProgressBar(45, levelColor[pctLevel(45)], true, 83))
 	want := strings.Repeat("▓", 9) + strings.Repeat("░", 7) + "▒" + strings.Repeat("░", 3)
 	if got != want {
 		t.Errorf("pct=45, compact=true, threshold=83:\n got %q (len=%d)\nwant %q (len=%d)", got, len([]rune(got)), want, len([]rune(want)))
@@ -58,7 +58,7 @@ func TestBuildProgressBarCompactMarkerFilledPast(t *testing.T) {
 	// markerPos = 83*20/100 = 16
 	// marker at 16 < filled 17, so marker is hidden (filled over it)
 	// 17 filled + 3 empty
-	got := stripANSI(buildProgressBar(85, getSemanticColor(85), true, 83))
+	got := stripANSI(buildProgressBar(85, levelColor[pctLevel(85)], true, 83))
 	want := strings.Repeat("▓", 17) + strings.Repeat("░", 3)
 	if got != want {
 		t.Errorf("pct=85, compact=true, threshold=83:\n got %q\nwant %q", got, want)
@@ -70,16 +70,16 @@ func TestBuildProgressBarCompactMarkerAtEnd(t *testing.T) {
 	// filled = 45*20/100 = 9
 	// markerPos = 96*20/100 = 19 (clamped to 19)
 	// 9 filled + 10 empty (positions 9-18) + marker at 19
-	got := stripANSI(buildProgressBar(45, getSemanticColor(45), true, 96))
+	got := stripANSI(buildProgressBar(45, levelColor[pctLevel(45)], true, 96))
 	want := strings.Repeat("▓", 9) + strings.Repeat("░", 10) + "▒"
 	if got != want {
 		t.Errorf("pct=45, compact=true, threshold=96:\n got %q (len=%d)\nwant %q (len=%d)", got, len([]rune(got)), want, len([]rune(want)))
 	}
 }
 
-// --- getSemanticColor tests ---
+// --- color tests ---
 
-func TestGetSemanticColor(t *testing.T) {
+func TestPctLevel(t *testing.T) {
 	tests := []struct {
 		name string
 		pct  int
@@ -95,9 +95,8 @@ func TestGetSemanticColor(t *testing.T) {
 		{"100% red", 100, "\033[38;5;196m"},
 	}
 	for _, tt := range tests {
-		got := getSemanticColor(tt.pct)
-		if got != tt.want {
-			t.Errorf("getSemanticColor(%d) [%s] = %q, want %q", tt.pct, tt.name, got, tt.want)
+		if got := levelColor[pctLevel(tt.pct)]; got != tt.want {
+			t.Errorf("pctLevel(%d) [%s] color = %q, want %q", tt.pct, tt.name, got, tt.want)
 		}
 	}
 }
@@ -180,8 +179,8 @@ func TestRenderFullData(t *testing.T) {
 		Workspace: WorkspaceInfo{ProjectDir: "/Users/t/Workspace/project"},
 		ContextWindow: ContextInfo{
 			ContextWindowSize: 200000,
-			UsedPercentage:    ptrFloat64(42.0),
-			CurrentUsage:      &CurrentUsage{InputTokens: 60000, OutputTokens: 20000, CacheCreationInputTokens: 2000, CacheReadInputTokens: 2000},
+			UsedPercentage:    ptrFloat64(32.0),
+			TotalInputTokens:  64000,
 		},
 		Cost: CostInfo{
 			TotalDurationMs:   300000,
@@ -200,19 +199,13 @@ func TestRenderFullData(t *testing.T) {
 		Behind:   1,
 	}
 	now := time.Now()
-	usage := &UsageData{
-		FiveHour: &UsageWindow{
-			Utilization: 42.0,
-			ResetsAt:    now.Add(2 * time.Hour).Format(time.RFC3339),
-		},
-		SevenDay: &UsageWindow{
-			Utilization: 15.0,
-			ResetsAt:    now.Add(48 * time.Hour).Format(time.RFC3339),
-		},
+	stdin.RateLimits = &RateLimits{
+		FiveHour: &RateLimitWindow{UsedPercentage: ptrFloat64(42), ResetsAt: ptrFloat64(float64(now.Add(2 * time.Hour).Unix()))},
+		SevenDay: &RateLimitWindow{UsedPercentage: ptrFloat64(15), ResetsAt: ptrFloat64(float64(now.Add(49 * time.Hour).Unix()))},
 	}
 	compact := CompactInfo{Enabled: false, ThresholdPct: 0}
 
-	Render(&buf, stdin, git, usage, compact)
+	Render(&buf, stdin, git, compact)
 	output := stripANSI(buf.String())
 	lines := strings.Split(output, "\n")
 
@@ -244,15 +237,14 @@ func TestRenderFullData(t *testing.T) {
 	}
 
 	// Row 2 checks
-	// 60000 input + 2000 cache create + 2000 cache read = 64k (output tokens excluded, matching used_percentage)
 	if !strings.Contains(row2, "64k/200k") {
 		t.Errorf("row2 missing tokens: %q", row2)
 	}
 	if !strings.Contains(row2, "5h:42%") {
 		t.Errorf("row2 missing 5h usage: %q", row2)
 	}
-	if !strings.Contains(row2, "7d:15%") {
-		t.Errorf("row2 missing 7d usage: %q", row2)
+	if !strings.Contains(row2, "7d:15% (2d") {
+		t.Errorf("row2 missing 7d usage with reset time: %q", row2)
 	}
 	if !strings.Contains(row2, "$1.50") {
 		t.Errorf("row2 missing cost: %q", row2)
@@ -268,7 +260,7 @@ func TestRenderMinimalData(t *testing.T) {
 	compact := CompactInfo{}
 
 	// Must not panic
-	Render(&buf, stdin, nil, nil, compact)
+	Render(&buf, stdin, nil, compact)
 
 	output := buf.String()
 	if output == "" {
@@ -290,7 +282,7 @@ func TestRenderAutoCompactBelowThreshold(t *testing.T) {
 	}
 	compact := CompactInfo{Enabled: true, ThresholdPct: 83}
 
-	Render(&buf, stdin, nil, nil, compact)
+	Render(&buf, stdin, nil, compact)
 	output := stripANSI(buf.String())
 
 	if !strings.Contains(output, "(↻83%)") {
@@ -308,30 +300,11 @@ func TestRenderAutoCompactPastThreshold(t *testing.T) {
 	}
 	compact := CompactInfo{Enabled: true, ThresholdPct: 83}
 
-	Render(&buf, stdin, nil, nil, compact)
+	Render(&buf, stdin, nil, compact)
 	output := stripANSI(buf.String())
 
 	if !strings.Contains(output, "(↻83%!)") {
 		t.Errorf("expected (↻83%%!) past threshold, got %q", output)
-	}
-}
-
-func TestRenderExceeds200k(t *testing.T) {
-	var buf bytes.Buffer
-	stdin := &StdinData{
-		ExceedsTokens: true,
-		ContextWindow: ContextInfo{
-			ContextWindowSize: 200000,
-			UsedPercentage:    ptrFloat64(50.0),
-		},
-	}
-	compact := CompactInfo{}
-
-	Render(&buf, stdin, nil, nil, compact)
-	output := stripANSI(buf.String())
-
-	if !strings.Contains(output, ">200k") {
-		t.Errorf("expected >200k indicator, got %q", output)
 	}
 }
 
@@ -340,7 +313,7 @@ func TestRenderNoUsageData(t *testing.T) {
 	stdin := &StdinData{}
 	compact := CompactInfo{}
 
-	Render(&buf, stdin, nil, nil, compact)
+	Render(&buf, stdin, nil, compact)
 	output := stripANSI(buf.String())
 
 	if !strings.Contains(output, "5h:\u2014") {
@@ -351,45 +324,37 @@ func TestRenderNoUsageData(t *testing.T) {
 	}
 }
 
-func TestRenderContextUsedPercentageOnly(t *testing.T) {
+func TestRenderContextTokens(t *testing.T) {
 	var buf bytes.Buffer
 	stdin := &StdinData{
 		ContextWindow: ContextInfo{
-			ContextWindowSize: 200000,
-			UsedPercentage:    ptrFloat64(42.0),
+			ContextWindowSize: 1000000,
+			UsedPercentage:    ptrFloat64(32.0),
+			TotalInputTokens:  320000,
 		},
 	}
-	compact := CompactInfo{}
 
-	Render(&buf, stdin, nil, nil, compact)
-	output := stripANSI(buf.String())
+	Render(&buf, stdin, nil, CompactInfo{})
+	full := buf.String()
 
-	// Bar should be at 42%, tokens estimated from percentage
-	// 42% of 200k = 84k
-	if !strings.Contains(output, "84k/200k") {
-		t.Errorf("expected estimated tokens 84k/200k, got %q", output)
+	if !strings.Contains(stripANSI(full), "320k/1m") {
+		t.Errorf("expected 320k/1m, got %q", stripANSI(full))
+	}
+	// 32% of the window is green by percent, but 320k tokens is past the 300k band.
+	if !strings.Contains(full, cHigh+"320k"+cReset) {
+		t.Errorf("token count should be colored by the absolute-token band (cHigh), raw: %q", full)
 	}
 }
 
-func TestRenderContextCurrentUsageOnly(t *testing.T) {
+func TestRenderContextNullPercentageShowsDash(t *testing.T) {
 	var buf bytes.Buffer
-	stdin := &StdinData{
-		ContextWindow: ContextInfo{
-			ContextWindowSize: 200000,
-			CurrentUsage: &CurrentUsage{
-				InputTokens:  80000,
-				OutputTokens: 20000,
-			},
-		},
-	}
-	compact := CompactInfo{}
+	stdin := &StdinData{ContextWindow: ContextInfo{ContextWindowSize: 200000, TotalInputTokens: 84000}}
 
-	Render(&buf, stdin, nil, nil, compact)
+	Render(&buf, stdin, nil, CompactInfo{})
 	output := stripANSI(buf.String())
 
-	// 80k input (output tokens excluded), 200k window = 40%
-	if !strings.Contains(output, "80k/200k") {
-		t.Errorf("expected 80k/200k with current_usage only, got %q", output)
+	if !strings.Contains(output, "\u2014") || strings.Contains(output, "84k") {
+		t.Errorf("null used_percentage should render a dash regardless of token count, got %q", output)
 	}
 }
 
@@ -400,13 +365,13 @@ func TestRenderContextNeither(t *testing.T) {
 			ContextWindowSize: 200000,
 		},
 	}
-	compact := CompactInfo{}
+	compact := CompactInfo{Enabled: true, ThresholdPct: 83}
 
-	Render(&buf, stdin, nil, nil, compact)
+	Render(&buf, stdin, nil, compact)
 	output := stripANSI(buf.String())
 
-	if !strings.Contains(output, "\u2014") {
-		t.Errorf("expected — for tokens with no context data, got %q", output)
+	if !strings.Contains(output, "\u2014 (↻83%)") {
+		t.Errorf("expected — and compact marker with no context data, got %q", output)
 	}
 }
 
@@ -415,19 +380,13 @@ func TestRenderWorktreeFromStdin(t *testing.T) {
 	stdin := &StdinData{
 		Model:     ModelInfo{ID: "claude-opus-4-6", DisplayName: "Opus"},
 		CWD:       "/path/to/.claude/worktrees/my-feature",
-		Workspace: WorkspaceInfo{ProjectDir: "/path/to/.claude/worktrees/my-feature"},
-		Worktree: &WorktreeInfo{
-			Name:   "my-feature",
-			Branch: "worktree-my-feature",
-		},
+		Workspace: WorkspaceInfo{ProjectDir: "/path/to/.claude/worktrees/my-feature", GitWorktree: "other-name"},
+		Worktree:  &WorktreeInfo{Name: "my-feature"},
 	}
-	git := &GitStatus{
-		Branch:   "worktree-my-feature",
-		Worktree: "other-name",
-	}
+	git := &GitStatus{Branch: "worktree-my-feature"}
 	compact := CompactInfo{}
 
-	Render(&buf, stdin, git, nil, compact)
+	Render(&buf, stdin, git, compact)
 	output := stripANSI(buf.String())
 	row1 := strings.Split(output, "\n")[0]
 
@@ -435,29 +394,26 @@ func TestRenderWorktreeFromStdin(t *testing.T) {
 		t.Errorf("row1 should use stdin worktree name, got %q", row1)
 	}
 	if strings.Contains(row1, "[wt:other-name]") {
-		t.Errorf("row1 should NOT use git worktree name, got %q", row1)
+		t.Errorf("row1 should NOT use workspace.git_worktree when worktree.name is set, got %q", row1)
 	}
 }
 
-func TestRenderWorktreeFromGitFallback(t *testing.T) {
+func TestRenderWorktreeFromWorkspace(t *testing.T) {
 	var buf bytes.Buffer
 	stdin := &StdinData{
 		Model:     ModelInfo{ID: "claude-opus-4-6", DisplayName: "Opus"},
-		CWD:       "/path/to/project",
-		Workspace: WorkspaceInfo{ProjectDir: "/path/to/project"},
+		CWD:       "/path/to/project-wt",
+		Workspace: WorkspaceInfo{ProjectDir: "/path/to/project-wt", GitWorktree: "project-wt"},
 	}
-	git := &GitStatus{
-		Branch:   "main",
-		Worktree: "git-detected",
-	}
+	git := &GitStatus{Branch: "main"}
 	compact := CompactInfo{}
 
-	Render(&buf, stdin, git, nil, compact)
+	Render(&buf, stdin, git, compact)
 	output := stripANSI(buf.String())
 	row1 := strings.Split(output, "\n")[0]
 
-	if !strings.Contains(row1, "[wt:git-detected]") {
-		t.Errorf("row1 should fall back to git worktree name, got %q", row1)
+	if !strings.Contains(row1, "[wt:project-wt]") {
+		t.Errorf("row1 should fall back to workspace.git_worktree, got %q", row1)
 	}
 }
 
@@ -490,11 +446,11 @@ func TestRenderEffortThinkingAbsent(t *testing.T) {
 	stdin := &StdinData{
 		Model: ModelInfo{ID: "claude-opus-4-7", DisplayName: "Opus"},
 	}
-	Render(&buf, stdin, nil, nil, CompactInfo{})
+	Render(&buf, stdin, nil, CompactInfo{})
 	row1 := strings.Split(stripANSI(buf.String()), "\n")[0]
 
-	if strings.Contains(row1, "*") {
-		t.Errorf("row1 should not contain * when thinking absent, got %q", row1)
+	if strings.Contains(row1, "∅") {
+		t.Errorf("row1 should not contain ∅ when thinking absent, got %q", row1)
 	}
 	if strings.Contains(row1, "•") {
 		t.Errorf("row1 should not contain • when effort absent, got %q", row1)
@@ -504,18 +460,19 @@ func TestRenderEffortThinkingAbsent(t *testing.T) {
 func TestRenderEffortHighThinkingOff(t *testing.T) {
 	var buf bytes.Buffer
 	stdin := &StdinData{
-		Model:  ModelInfo{ID: "claude-opus-4-7"},
-		Effort: &EffortInfo{Level: "high"},
+		Model:    ModelInfo{ID: "claude-opus-4-7"},
+		Effort:   &EffortInfo{Level: "high"},
+		Thinking: &ThinkingInfo{Enabled: false},
 	}
-	Render(&buf, stdin, nil, nil, CompactInfo{})
+	Render(&buf, stdin, nil, CompactInfo{})
 	full := buf.String()
 	row1Plain := strings.Split(stripANSI(full), "\n")[0]
 
-	if !strings.Contains(row1Plain, "Opus 4.7•high") {
-		t.Errorf("row1 missing 'Opus 4.7•high', got %q", row1Plain)
+	if !strings.Contains(row1Plain, "Opus 4.7∅•high") {
+		t.Errorf("row1 missing 'Opus 4.7∅•high', got %q", row1Plain)
 	}
-	if strings.Contains(row1Plain, "*") {
-		t.Errorf("row1 should not contain * when thinking off, got %q", row1Plain)
+	if !strings.Contains(full, cMuted+"∅"+cReset) {
+		t.Errorf("'∅' should be colored cMuted, raw output: %q", full)
 	}
 	if !strings.Contains(full, cWarn+"high"+cReset) {
 		t.Errorf("'high' should be colored cWarn, raw output: %q", full)
@@ -529,15 +486,13 @@ func TestRenderEffortMaxThinkingOn(t *testing.T) {
 		Effort:   &EffortInfo{Level: "max"},
 		Thinking: &ThinkingInfo{Enabled: true},
 	}
-	Render(&buf, stdin, nil, nil, CompactInfo{})
+	Render(&buf, stdin, nil, CompactInfo{})
 	full := buf.String()
 	row1Plain := strings.Split(stripANSI(full), "\n")[0]
 
-	if !strings.Contains(row1Plain, "Opus 4.7*•max") {
-		t.Errorf("row1 missing 'Opus 4.7*•max', got %q", row1Plain)
-	}
-	if !strings.Contains(full, cMuted+"*"+cReset) {
-		t.Errorf("'*' should be colored cMuted, raw output: %q", full)
+	// Thinking on is the default, so it is not marked.
+	if !strings.Contains(row1Plain, "Opus 4.7•max") {
+		t.Errorf("row1 missing 'Opus 4.7•max', got %q", row1Plain)
 	}
 	if !strings.Contains(full, cCrit+"max"+cReset) {
 		t.Errorf("'max' should be colored cCrit, raw output: %q", full)
@@ -550,7 +505,7 @@ func TestRenderEffortAuto(t *testing.T) {
 		Model:  ModelInfo{ID: "claude-opus-4-7"},
 		Effort: &EffortInfo{Level: "auto"},
 	}
-	Render(&buf, stdin, nil, nil, CompactInfo{})
+	Render(&buf, stdin, nil, CompactInfo{})
 	full := buf.String()
 
 	if !strings.Contains(full, cAccent+"auto"+cReset) {
@@ -564,7 +519,7 @@ func TestRenderEffortUnknownTier(t *testing.T) {
 		Model:  ModelInfo{ID: "claude-opus-4-7"},
 		Effort: &EffortInfo{Level: "future-tier"},
 	}
-	Render(&buf, stdin, nil, nil, CompactInfo{})
+	Render(&buf, stdin, nil, CompactInfo{})
 	full := buf.String()
 	row1Plain := strings.Split(stripANSI(full), "\n")[0]
 
@@ -584,7 +539,7 @@ func TestRenderEffortBeforeAgent(t *testing.T) {
 		Effort:   &EffortInfo{Level: "high"},
 		Thinking: &ThinkingInfo{Enabled: true},
 	}
-	Render(&buf, stdin, nil, nil, CompactInfo{})
+	Render(&buf, stdin, nil, CompactInfo{})
 	row1 := strings.Split(stripANSI(buf.String()), "\n")[0]
 
 	hi := strings.Index(row1, "high")
@@ -631,7 +586,7 @@ func TestRenderPRBadgeInGitSegment(t *testing.T) {
 		PR:    &PRInfo{Number: 1234, ReviewState: "pending"},
 	}
 	git := &GitStatus{Branch: "main", Modified: 2}
-	Render(&buf, stdin, git, nil, CompactInfo{})
+	Render(&buf, stdin, git, CompactInfo{})
 	row1 := strings.Split(stripANSI(buf.String()), "\n")[0]
 
 	if !strings.Contains(row1, "Fable 5") {
@@ -648,7 +603,7 @@ func TestRenderPRBadgeAbsentWithoutGit(t *testing.T) {
 		Model: ModelInfo{ID: "claude-fable-5"},
 		PR:    &PRInfo{Number: 1234, ReviewState: "approved"},
 	}
-	Render(&buf, stdin, nil, nil, CompactInfo{})
+	Render(&buf, stdin, nil, CompactInfo{})
 	row1 := strings.Split(stripANSI(buf.String()), "\n")[0]
 
 	if strings.Contains(row1, "#1234") {
@@ -665,18 +620,26 @@ func TestRenderFastModeMarker(t *testing.T) {
 		Effort:   &EffortInfo{Level: "high"},
 		Agent:    AgentInfo{Name: "reviewer"},
 	}
-	Render(&buf, stdin, nil, nil, CompactInfo{})
+	Render(&buf, stdin, nil, CompactInfo{})
 	row1 := strings.Split(stripANSI(buf.String()), "\n")[0]
 
-	if !strings.HasPrefix(row1, "Opus 5⚡*•high [reviewer]") {
-		t.Errorf("expected fast marker between model and thinking marker, got %q", row1)
+	if !strings.HasPrefix(row1, "Opus 5⚡•high [reviewer]") {
+		t.Errorf("expected fast marker between model and effort, got %q", row1)
+	}
+
+	buf.Reset()
+	stdin.Thinking.Enabled = false
+	Render(&buf, stdin, nil, CompactInfo{})
+	row1 = strings.Split(stripANSI(buf.String()), "\n")[0]
+	if !strings.HasPrefix(row1, "Opus 5⚡∅•high [reviewer]") {
+		t.Errorf("expected thinking-off marker between fast marker and effort, got %q", row1)
 	}
 }
 
 func TestRenderFastModeAbsent(t *testing.T) {
 	var buf bytes.Buffer
 	stdin := &StdinData{Model: ModelInfo{ID: "claude-opus-5"}}
-	Render(&buf, stdin, nil, nil, CompactInfo{})
+	Render(&buf, stdin, nil, CompactInfo{})
 	row1 := strings.Split(stripANSI(buf.String()), "\n")[0]
 
 	if strings.Contains(row1, "⚡") {

@@ -72,20 +72,18 @@ func TestFormatResetTime(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		resetISO string
+		resetsAt time.Time
 		want     string
 	}{
-		{"30 min from now", now.Add(30 * time.Minute).Format(time.RFC3339), "30m"},
-		{"2h15m from now", now.Add(2*time.Hour + 15*time.Minute).Format(time.RFC3339), "2h15m"},
-		{"2h exactly", now.Add(2 * time.Hour).Format(time.RFC3339), "2h"},
-		{"1d3h from now", now.Add(27 * time.Hour).Format(time.RFC3339), "1d3h"},
-		{"past", now.Add(-10 * time.Minute).Format(time.RFC3339), "0m"},
-		{"empty string", "", "0m"},
+		{"30 min from now", now.Add(30 * time.Minute), "30m"},
+		{"2h15m from now", now.Add(2*time.Hour + 15*time.Minute), "2h15m"},
+		{"2h exactly", now.Add(2 * time.Hour), "2h"},
+		{"1d3h from now", now.Add(27 * time.Hour), "1d3h"},
+		{"past", now.Add(-10 * time.Minute), "0m"},
 	}
 	for _, tt := range tests {
-		got := FormatResetTime(tt.resetISO, now)
-		if got != tt.want {
-			t.Errorf("FormatResetTime(%q) [%s] = %q, want %q", tt.resetISO, tt.name, got, tt.want)
+		if got := FormatResetTime(tt.resetsAt, now); got != tt.want {
+			t.Errorf("FormatResetTime [%s] = %q, want %q", tt.name, got, tt.want)
 		}
 	}
 }

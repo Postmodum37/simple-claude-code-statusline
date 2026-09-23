@@ -13,15 +13,9 @@ func main() {
 		cacheDir = os.TempDir()
 	}
 
-	// Gather data
-	usageData := GetUsageData(stdin)
-	gitData := GetGitStatus(stdin.Workspace.ProjectDir, cacheDir)
+	git := GetGitStatus(stdin.Workspace.ProjectDir, cacheDir)
 	compactCfg := DefaultCompactConfig(os.Getenv("HOME"), stdin.Workspace.ProjectDir, stdin.Model.ID)
-	compactEnabled, compactPct := GetCompactThreshold(stdin.ContextWindow.ContextWindowSize, compactCfg)
+	compact := GetCompactThreshold(stdin.ContextWindow.ContextWindowSize, compactCfg)
 
-	// Render to stdout
-	Render(os.Stdout, stdin, gitData, usageData, CompactInfo{
-		Enabled:      compactEnabled,
-		ThresholdPct: compactPct,
-	})
+	Render(os.Stdout, stdin, git, compact)
 }

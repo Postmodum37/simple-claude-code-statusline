@@ -52,20 +52,11 @@ func FormatCost(usd float64) string {
 	return fmt.Sprintf("$%.2f", usd)
 }
 
-// FormatResetTime formats an ISO 8601 reset timestamp relative to now.
+// FormatResetTime formats a reset time relative to now.
 // Skips zero sub-units (e.g., 2h exactly → "2h", not "2h0m").
-// Returns "0m" for empty string or past timestamps.
-func FormatResetTime(resetISO string, now time.Time) string {
-	if resetISO == "" {
-		return "0m"
-	}
-
-	resetTime, err := time.Parse(time.RFC3339, resetISO)
-	if err != nil {
-		return "0m"
-	}
-
-	diff := int(resetTime.Sub(now).Seconds())
+// Returns "0m" for past times.
+func FormatResetTime(resetsAt, now time.Time) string {
+	diff := int(resetsAt.Sub(now).Seconds())
 	if diff < 0 {
 		return "0m"
 	}

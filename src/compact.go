@@ -25,7 +25,7 @@ type CompactConfig struct {
 }
 
 // DefaultCompactConfig builds the config for the current user/project,
-// mirroring Claude Code's settings precedence as of v2.1.259.
+// mirroring Claude Code's settings precedence as of v2.1.280.
 func DefaultCompactConfig(home, projectDir, modelID string) CompactConfig {
 	cfg := CompactConfig{
 		ClaudeJSONPath: filepath.Join(home, ".claude.json"),
@@ -47,7 +47,13 @@ func DefaultCompactConfig(home, projectDir, modelID string) CompactConfig {
 	return cfg
 }
 
-// Auto-compact constants, verified against Claude Code v2.1.259.
+// CompactInfo holds auto-compact state for the progress bar.
+type CompactInfo struct {
+	Enabled      bool
+	ThresholdPct int // used_percentage at which auto-compact fires, 0-100
+}
+
+// Auto-compact constants, verified against Claude Code v2.1.280.
 const (
 	compactOutputReserve = 20000  // reserved for the model's response (capped by CLAUDE_CODE_MAX_OUTPUT_TOKENS)
 	compactBuffer        = 13000  // auto-compact fires this many tokens before the effective window fills
@@ -63,16 +69,16 @@ const (
 //	effective = window − min(maxOutputTokens, 20000)
 //	threshold = effective − 13000   (CLAUDE_AUTOCOMPACT_PCT_OVERRIDE can only lower it)
 //
-// Returns (enabled, thresholdPct) where thresholdPct is 0-100 relative to the
-// full contextWindowSize, i.e. the used_percentage at which auto-compact fires.
-func GetCompactThreshold(contextWindowSize int, cfg CompactConfig) (bool, int) {
+// ThresholdPct is relative to the full contextWindowSize, i.e. the
+// used_percentage at which auto-compact fires.
+func GetCompactThreshold(contextWindowSize int, cfg CompactConfig) CompactInfo {
 	if contextWindowSize <= 0 {
-		return false, 0
+		return CompactInfo{}
 	}
 
 	// 1. Kill switches.
 	if envTruthy(os.Getenv("DISABLE_AUTO_COMPACT")) || envTruthy(os.Getenv("DISABLE_COMPACT")) {
-		return false, 0
+		return CompactInfo{}
 	}
 
 	// 2. autoCompactEnabled: settings files (highest precedence wins), then
@@ -87,7 +93,7 @@ func GetCompactThreshold(contextWindowSize int, cfg CompactConfig) (bool, int) {
 		enabled = v
 	}
 	if !enabled {
-		return false, 0
+		return CompactInfo{}
 	}
 
 	// 3. Auto-compact window: env var → settings → server-provided per-model
@@ -121,7 +127,7 @@ func GetCompactThreshold(contextWindowSize int, cfg CompactConfig) (bool, int) {
 	}
 	effectiveWindow := cappedWindow - outputReserve
 	if effectiveWindow <= 0 {
-		return false, 0
+		return CompactInfo{}
 	}
 
 	// 5. Threshold, optionally lowered by CLAUDE_AUTOCOMPACT_PCT_OVERRIDE.
@@ -132,7 +138,7 @@ func GetCompactThreshold(contextWindowSize int, cfg CompactConfig) (bool, int) {
 		}
 	}
 	if threshold <= 0 {
-		return true, 0
+		return CompactInfo{Enabled: true}
 	}
 
 	// 6. Percentage against the ORIGINAL context window size, clamped.
@@ -143,7 +149,7 @@ func GetCompactThreshold(contextWindowSize int, cfg CompactConfig) (bool, int) {
 	if thresholdPct > 100 {
 		thresholdPct = 100
 	}
-	return true, thresholdPct
+	return CompactInfo{Enabled: true, ThresholdPct: thresholdPct}
 }
 
 // --- helpers ---

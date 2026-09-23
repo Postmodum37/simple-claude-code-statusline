@@ -8,6 +8,7 @@ import "strings"
 //   - New: claude-{model}-{major}[-{minor}][-{date}]  e.g. "claude-opus-4-6", "claude-sonnet-4-20250514"
 //   - Old: claude-{major}-{minor}-{model}[-{date}]    e.g. "claude-3-5-sonnet-20241022"
 //   - Context suffix stripped: "claude-opus-4-6[1m]"   → same as "claude-opus-4-6"
+//   - Provider forms: "us.anthropic.claude-opus-4-6-v1:0" (Bedrock), "claude-opus-4-5@20251101" (Vertex)
 //
 // Falls back to the first word of displayName when the model ID is empty or
 // contains no recognized family name.
@@ -33,9 +34,13 @@ func ModelDisplayName(id, displayName string) string {
 		return ""
 	}
 
-	// Strip context suffix like [1m] before version parsing.
+	// Drop provider prefixes ("us.anthropic.") and suffixes ("[1m]", "@20251101",
+	// ":0") before version parsing.
 	clean := id
-	if idx := strings.Index(clean, "["); idx != -1 {
+	if idx := strings.Index(clean, "claude-"); idx > 0 {
+		clean = clean[idx:]
+	}
+	if idx := strings.IndexAny(clean, "[@:"); idx != -1 {
 		clean = clean[:idx]
 	}
 

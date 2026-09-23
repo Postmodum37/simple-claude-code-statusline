@@ -16,7 +16,6 @@ import (
 // GitStatus holds parsed git state for display.
 type GitStatus struct {
 	Branch   string `json:"branch"`
-	Worktree string `json:"worktree"`
 	Added    int    `json:"added"`
 	Modified int    `json:"modified"`
 	Deleted  int    `json:"deleted"`
@@ -35,56 +34,58 @@ func (c *GitCache) IsStale(ttlSeconds int64) bool {
 	return time.Now().Unix()-c.FetchedAt > ttlSeconds
 }
 
-// parseGitPorcelain parses `git status --porcelain` output and returns
-// counts of added, modified, and deleted files. Matches the bash script logic.
-func parseGitPorcelain(output string) (added, modified, deleted int) {
-	if output == "" {
-		return 0, 0, 0
-	}
+// parseGitStatus parses `git status --porcelain=v2 --branch` output: branch
+// name and ahead/behind from the "# branch.*" headers, file counts from the
+// entries. Detached HEAD is reported as "HEAD".
+func parseGitStatus(output string) GitStatus {
+	var s GitStatus
 	for _, line := range strings.Split(output, "\n") {
-		if len(line) < 2 {
-			continue
-		}
-		status := line[:2]
-		switch status {
-		// Untracked
-		case "??":
-			added++
-		// Added (staged)
-		case "A ", "AM", "AD":
-			added++
-		// Modified (various combinations)
-		case " M", "M ", "MM", "RM", "CM":
-			modified++
-		// Deleted
-		case " D", "D ", "MD", "RD", "CD":
-			deleted++
-		// Renamed/Copied clean (target is new)
-		case "R ", "C ":
-			added++
-		// Unmerged/conflict states
-		case "UU", "AA", "DD", "AU", "UA", "DU", "UD":
-			modified++
+		switch {
+		case strings.HasPrefix(line, "# branch.head "):
+			s.Branch = strings.TrimPrefix(line, "# branch.head ")
+			if s.Branch == "(detached)" {
+				s.Branch = "HEAD"
+			}
+		case strings.HasPrefix(line, "# branch.ab "):
+			// "# branch.ab +<ahead> -<behind>"
+			if f := strings.Fields(line); len(f) == 4 {
+				s.Ahead, _ = strconv.Atoi(strings.TrimPrefix(f[2], "+"))
+				s.Behind, _ = strconv.Atoi(strings.TrimPrefix(f[3], "-"))
+			}
+		case strings.HasPrefix(line, "? "):
+			s.Added++
+		case strings.HasPrefix(line, "u "):
+			s.Modified++ // unmerged / conflict
+		case len(line) >= 4 && (line[0] == '1' || line[0] == '2') && line[1] == ' ':
+			// Ordinary ("1") or renamed/copied ("2") entry; XY at [2:4], "." = unmodified.
+			x, y := line[2], line[3]
+			switch {
+			case x == 'A' || y == 'A':
+				s.Added++
+			case x == 'D' || y == 'D':
+				s.Deleted++
+			case (x == 'R' || x == 'C') && y == '.':
+				s.Added++ // clean rename/copy: the target is new
+			default:
+				s.Modified++
+			}
 		}
 	}
-	return
+	return s
 }
 
-// readGitCache reads a cached GitCache from disk.
-// Returns nil, nil for nonexistent or corrupted files.
-func readGitCache(path string) (*GitCache, error) {
+// readGitCache reads a cached GitCache from disk. Returns nil for
+// nonexistent or corrupted files.
+func readGitCache(path string) *GitCache {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, nil
+		return nil
 	}
 	var cache GitCache
-	if err := json.Unmarshal(data, &cache); err != nil {
-		return nil, nil
+	if json.Unmarshal(data, &cache) != nil {
+		return nil
 	}
-	return &cache, nil
+	return &cache
 }
 
 // writeGitCache writes a GitCache to disk atomically using tmpfile + rename.
@@ -117,7 +118,7 @@ func truncateBranch(branch string, maxLen int) string {
 	if len(runes) <= maxLen {
 		return branch
 	}
-	return string(runes[:maxLen-1]) + "\u2026"
+	return string(runes[:maxLen-1]) + "…"
 }
 
 // gitCachePath returns the cache file path for a given project directory.
@@ -127,18 +128,17 @@ func gitCachePath(projectDir, cacheDir string) string {
 }
 
 // runGit executes a git command with a 1-second timeout and --no-optional-locks.
-// Returns trimmed stdout, or empty string on error.
+// Returns stdout, or empty string on error.
 func runGit(projectDir string, args ...string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
 	fullArgs := append([]string{"--no-optional-locks", "-C", projectDir}, args...)
-	cmd := exec.CommandContext(ctx, "git", fullArgs...)
-	out, err := cmd.Output()
+	out, err := exec.CommandContext(ctx, "git", fullArgs...).Output()
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(out))
+	return string(out)
 }
 
 // GetGitStatus returns the current git status for projectDir, using a file cache
@@ -149,59 +149,27 @@ func GetGitStatus(projectDir, cacheDir string) *GitStatus {
 	}
 
 	cachePath := gitCachePath(projectDir, cacheDir)
-
-	// Try cache first
-	if cached, _ := readGitCache(cachePath); cached != nil && !cached.IsStale(5) {
+	if cached := readGitCache(cachePath); cached != nil && !cached.IsStale(5) {
 		return &cached.Status
 	}
 
-	// Verify this is a git repo
-	if runGit(projectDir, "rev-parse", "--git-dir") == "" {
-		return nil
-	}
-
-	// Get branch name
-	branch := runGit(projectDir, "rev-parse", "--abbrev-ref", "HEAD")
-	branch = truncateBranch(branch, 20)
-
-	// Parse porcelain status
-	porcelain := runGit(projectDir, "status", "--porcelain")
-	added, modified, deleted := parseGitPorcelain(porcelain)
-
-	// Get ahead/behind counts
-	var ahead, behind int
-	leftRight := runGit(projectDir, "rev-list", "--left-right", "--count", "@{upstream}...HEAD")
-	if leftRight != "" {
-		parts := strings.Fields(leftRight)
-		if len(parts) == 2 {
-			behind, _ = strconv.Atoi(parts[0])
-			ahead, _ = strconv.Atoi(parts[1])
+	// One command covers branch, ahead/behind, and file status; inside a repo
+	// it always prints the "# branch.oid" header. Empty output means it failed:
+	// either not a repo, or too slow (large repo hitting the timeout). Fall back
+	// to the branch alone so the git segment still shows, and cache that too.
+	var status GitStatus
+	if out := runGit(projectDir, "status", "--porcelain=v2", "--branch"); out != "" {
+		status = parseGitStatus(out)
+	} else {
+		status.Branch = strings.TrimSpace(runGit(projectDir, "rev-parse", "--abbrev-ref", "HEAD"))
+		if status.Branch == "" {
+			return nil // not a git repo
 		}
 	}
-
-	// Detect worktree: .git is a file (not directory) in linked worktrees
-	var worktree string
-	gitDotPath := filepath.Join(projectDir, ".git")
-	if info, err := os.Stat(gitDotPath); err == nil && !info.IsDir() {
-		worktree = filepath.Base(projectDir)
-	}
-
-	status := GitStatus{
-		Branch:   branch,
-		Worktree: worktree,
-		Added:    added,
-		Modified: modified,
-		Deleted:  deleted,
-		Ahead:    ahead,
-		Behind:   behind,
-	}
+	status.Branch = truncateBranch(status.Branch, 20)
 
 	// Write cache (best effort)
-	cache := &GitCache{
-		FetchedAt: time.Now().Unix(),
-		Status:    status,
-	}
-	writeGitCache(cachePath, cache)
+	writeGitCache(cachePath, &GitCache{FetchedAt: time.Now().Unix(), Status: status})
 
 	return &status
 }

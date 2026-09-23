@@ -1,4 +1,5 @@
 .DS_Store
 .claude/
-docs/
+docs/*
+!docs/claude-code-version-reviews.md
 .superpowers/

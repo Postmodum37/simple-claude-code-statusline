@@ -90,7 +90,42 @@ func TestModelDisplayName(t *testing.T) {
 			want: "Mythos 5.1",
 		},
 		{
-			name: "empty id falls back to first word of display name",
+			name: "opus 5.5",
+			id:   "claude-opus-5-5",
+			want: "Opus 5.5",
+		},
+		{
+			name: "opus 5.5 with [1m] context suffix",
+			id:   "claude-opus-5-5[1m]",
+			want: "Opus 5.5",
+		},
+		{
+			name: "bedrock cross-region id with version suffix",
+			id:   "us.anthropic.claude-opus-4-6-v1:0",
+			want: "Opus 4.6",
+		},
+		{
+			name: "bedrock id without date",
+			id:   "anthropic.claude-opus-5",
+			want: "Opus 5",
+		},
+		{
+			name: "bedrock global id with date and version suffix",
+			id:   "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+			want: "Sonnet 4.5",
+		},
+		{
+			name: "bedrock old-format id",
+			id:   "anthropic.claude-3-5-sonnet-20241022-v2:0",
+			want: "Sonnet 3.5",
+		},
+		{
+			name: "vertex id with @date snapshot",
+			id:   "claude-opus-4-5@20251101",
+			want: "Opus 4.5",
+		},
+		{
+			name:        "empty id falls back to first word of display name",
 			id:          "",
 			displayName: "Claude 4 Opus",
 			want:        "Claude",

@@ -269,12 +269,12 @@ func TestGetCompactThreshold(t *testing.T) {
 			// Always include a nonexistent path to prove missing files are harmless.
 			cfg.SettingsPaths = append(cfg.SettingsPaths, filepath.Join(dir, "missing", "settings.json"))
 
-			gotEnabled, gotThresholdPct := GetCompactThreshold(tt.contextWindowSize, cfg)
-			if gotEnabled != tt.wantEnabled {
-				t.Errorf("enabled = %v, want %v", gotEnabled, tt.wantEnabled)
+			got := GetCompactThreshold(tt.contextWindowSize, cfg)
+			if got.Enabled != tt.wantEnabled {
+				t.Errorf("enabled = %v, want %v", got.Enabled, tt.wantEnabled)
 			}
-			if gotThresholdPct != tt.wantThresholdPct {
-				t.Errorf("thresholdPct = %d, want %d", gotThresholdPct, tt.wantThresholdPct)
+			if got.ThresholdPct != tt.wantThresholdPct {
+				t.Errorf("thresholdPct = %d, want %d", got.ThresholdPct, tt.wantThresholdPct)
 			}
 		})
 	}
