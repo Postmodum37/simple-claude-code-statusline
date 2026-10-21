@@ -40,7 +40,7 @@ On a 200k window the absolute bands never change the color (150k is 75%), so the
 
 ### Rate Limit Colors
 
-The 5h and 7d percentages are colored by **pace**, not raw fill: 80% used with 20 minutes left is fine, 40% used with 4.5 hours left will run out. The plugin projects end-of-window usage from the fraction of the window that has elapsed (derived from `resets_at`):
+The 5h and 7d percentages are colored by **pace**, not raw fill: 70% used with 30 minutes left is fine, 40% used with 4.5 hours left will run out. The plugin projects end-of-window usage from the fraction of the window that has elapsed (derived from `resets_at`):
 
 | Projected end-of-window usage | Color |
 |-------------------------------|-------|

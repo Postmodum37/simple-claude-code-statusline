@@ -102,8 +102,8 @@ const (
 // clamped to at least this fraction of the window before projecting.
 const paceMinElapsedFraction = 0.25
 
-// usageColor colors a rate-limit window by pace rather than raw fill: 80% used
-// with 20 minutes left is fine, 40% used with 4.5h left will run out. It
+// usageColor colors a rate-limit window by pace rather than raw fill: 70% used
+// with 30 minutes left is fine, 40% used with 4.5h left will run out. It
 // projects end-of-window usage from the fraction of the window elapsed.
 //
 // Pace can relax the raw-fill band (pctLevel) freely but raise it by at most
